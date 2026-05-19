@@ -23,7 +23,7 @@ class.__index = class
 
 class.DataTypes = DataTypes
 
-local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})
+local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})	
 	local unSerializedPacket = t or {}
 
 	for _, dataType in dataTypes do
@@ -36,6 +36,10 @@ local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: 
 end
 
 local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {DataTypes.DataType})	
+	if #datas ~= #dataTypes then
+		error(`Serialize failed, Expect to serialize {#dataTypes} data types, but got {#datas} datas types.`)
+	end
+	
 	for i, dataInterperter in dataTypes do
 		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
 		offset += offsetIncreased
