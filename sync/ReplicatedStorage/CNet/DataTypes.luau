@@ -1,5 +1,5 @@
 local dataTypes = {
-	u8number = require(script.u8number)
+	u8 = require(script.u8)
 }
 
 export type DataType = {
