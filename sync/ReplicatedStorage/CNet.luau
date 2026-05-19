@@ -23,6 +23,27 @@ class.__index = class
 
 class.DataTypes = DataTypes
 
+local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})
+	local unSerializedPacket = t or {}
+
+	for _, dataType in dataTypes do
+		local value, len = dataType.read(packet, offset)
+		offset += len or dataType.bytes
+		table.insert(unSerializedPacket, value)
+	end
+
+	return unSerializedPacket, offset
+end
+
+local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {DataTypes.DataType})	
+	for i, dataInterperter in dataTypes do
+		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
+		offset += offsetIncreased
+	end
+
+	return offset
+end
+
 local function queuePacketToNet(net: Net, packet: any)
 	if #net._queuedPackets >= MAX_PACKETS_QUEUE then
 		net._packetsDropped += 1
@@ -36,27 +57,6 @@ local function queuePacketToNet(net: Net, packet: any)
 	end
 
 	table.insert(net._queuedPackets, packet)
-end
-
-local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})
-	local unSerializedPacket = t or {}
-
-	for _, dataType in dataTypes do
-		local value, len = dataType.read(packet, offset)
-		offset += len or dataType.bytes
-		table.insert(unSerializedPacket, value)
-	end
-
-	return unSerializedPacket, offset
-end
-
-local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {DataTypes.DataType}, )
-	for i, dataInterperter in dataTypes do
-		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
-		offset += offsetIncreased
-	end
-
-	return offset
 end
 
 local function processServerPackets()
@@ -88,7 +88,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 		local net = netsById[packetId]
 		offset += 1
 
-		local unSerializedPacket, newOffset = unSerialize({player}, packets, net._dataTypes, offset)
+		local unSerializedPacket, newOffset = unSerialize({player}, offset, packets, net._dataTypes)
 		offset = newOffset
 
 		if net._response then
@@ -97,26 +97,28 @@ local function onPacketReceived(packets: buffer, player: Player?)
 					queuePacketToNet(net, unSerializedPacket)
 					continue
 				end
-				
+
 				if player then
 					playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
 				end
-				
+
 				local targetBuffer = player and playerPackets[player].b or globalPackets
 				local bOffset = player and playerPackets[player].offset or globalPacketOffset
+				local oldOffset = bOffset
 				
 				buffer.writeu8(targetBuffer, bOffset, net._id)
-				bOffset = serialize( targetBuffer, bOffset + 1, net.OnInvoke( unpack(unSerializedPacket) ), net._reponseDataTypes ) + 1
-				
+				bOffset = serialize( targetBuffer, bOffset + 1, {net._onInvoke( unpack(unSerializedPacket) )}, net._reponseDataTypes ) + 1
+
 				if player then
 					playerPackets[player].offset = bOffset
 				else
 					globalPacketOffset = bOffset
+					offset += bOffset - oldOffset 
 				end
-				
+
 			else
 				invokingPackets[net._id] = nil
-				task.spawn(net._thread, unpack(unSerializedPacket))
+				task.spawn(net._waitingForResponse, unpack(unSerializedPacket))
 			end
 		else
 			if net._eventListenerCount > 0 then
@@ -140,7 +142,6 @@ local function onPacketReceived(packets: buffer, player: Player?)
 		end
 
 		packetId = buffer.readu8(packets, offset)
-		print(packetId, offset)
 	end
 
 	debug.profileend()
@@ -182,7 +183,7 @@ function class:InvokeServer(...)
 	buffer.writeu8(globalPackets, globalPacketOffset, self._id)
 	globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes) + 1 
 
-	self._thread = coroutine.running()
+	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
 	return coroutine.yield()
 end
@@ -195,11 +196,38 @@ function class:InvokeClient(player, ...)
 	local datas = { ... }
 
 	buffer.writeu8(b, offset, self._id)
-	playerPackets[player].offset = serialize(globalPackets, offset + 1, datas, self._dataTypes) + 1 
+	playerPackets[player].offset = serialize(b, offset + 1, datas, self._dataTypes) + 1 
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
 	return coroutine.yield()
+end
+
+function class:OnInvoke(func: () -> ())
+	self._onInvoke = func
+	
+	if #self._queuedPackets > 0 then		
+		for _, packet in self._queuedPackets do
+			
+			if RunService:IsClient() then
+				buffer.writeu8(globalPackets, globalPacketOffset, self._id)
+				globalPacketOffset = serialize( globalPackets, globalPacketOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes ) + 1
+			else
+				local player = packet[1]
+
+				playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
+				local targetBuffer =  playerPackets[player].b
+				local bOffset = playerPackets[player].offset 
+
+				buffer.writeu8(targetBuffer, bOffset, self._id)
+				bOffset = serialize( targetBuffer, bOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes ) + 1
+
+				playerPackets[player].offset = bOffset
+			end
+		end
+		
+	end
+
 end
 
 -- Changes the net to response net, like RemoteFunction
@@ -297,7 +325,7 @@ function class:Wait()
 	self._eventListeners.next = link
 	self._eventListenerCount += 1
 
-	coroutine.yield()
+	return coroutine.yield()
 end
 
 if RunService:IsServer() then
@@ -331,7 +359,7 @@ export type Net = {
 
 	_response: boolean,
 	_waitingForResponse: thread?,
-	OnInvoke: (...any) -> (...any)?,
+	_onInvoke: (...any) -> (...any)?,
 
 	-- constructors
 	new: (netName: string, ...DataTypes.DataType) -> Net,
@@ -341,7 +369,8 @@ export type Net = {
 	Fire: (self: Net, player: Player, ...any) -> ...any?,
 	InvokeClient: (self: Net, player: Player, ...any) -> ...any,
 	InvokeServer: (self: Net, ...any) -> ...any,
-
+	OnInvoke: (self: Net, func: () -> () ) -> (),
+	
 	-- listen methods
 	Connect: (self: Net, func: (...any) -> ()) -> { Disconnect: () -> () },
 	Once: (self: Net, func: (...any) -> ()) -> (),
