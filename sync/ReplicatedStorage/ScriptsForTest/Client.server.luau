@@ -1,9 +1,7 @@
 local net = require(game.ReplicatedStorage.CNet)
 
-local newNet = net.new("hello", net.DataTypes.u8):Response()
+local newNet = net.new("hello", net.DataTypes.u8):Unreliable()
 
-newNet:OnInvoke(function(n)
-	return n / 2
-end)
-
---print( newNet:InvokeServer(10) )
+--newNet:Connect(function(number)
+--	print( number / 2 )
+--end)

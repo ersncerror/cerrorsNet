@@ -2,6 +2,8 @@ local RunService = game:GetService("RunService")
 
 local DataTypes = require(script.DataTypes)
 
+local readu8 = buffer.readu8
+
 local idCounter = 1
 
 local BYTES_PER_FRAMES = 256 -- every frames can hold for 256 bytes.
@@ -10,10 +12,14 @@ local MAX_PACKETS_QUEUE = 128
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
 local globalPacketOffset = 0
 
-local playerPackets : { [Player]: { b: buffer, offset: number } }
+local unreliablePackets = buffer.create(BYTES_PER_FRAMES)
+local unreliPacketOffset = 0
+
+local playerPackets : { [Player]: { b: buffer, offset: number, unreliB: buffer?, unreliOffset: number? } }
 local invokingPackets = {}
 
 local remote: RemoteEvent
+local unreliableRemote : UnreliableRemoteEvent
 
 local nets = {}
 local netsById = {} :: { [number]: Net }
@@ -37,7 +43,7 @@ end
 
 local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {DataTypes.DataType})	
 	if #datas ~= #dataTypes then
-		error(`Serialize failed, Expect to serialize {#dataTypes} data types, but got {#datas} datas types.`)
+		warn(`[CNet]: Possibly bug detected. Expect to serialize {#dataTypes} data types, but got {#datas} datas types to serialize.`)
 	end
 	
 	for i, dataInterperter in dataTypes do
@@ -49,12 +55,15 @@ local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {Da
 end
 
 local function queuePacketToNet(net: Net, packet: any)
+	local maxPacketsInQueue = net._unreliable and 1 or MAX_PACKETS_QUEUE
+	
 	if #net._queuedPackets >= MAX_PACKETS_QUEUE then
 		net._packetsDropped += 1
 
-		if MAX_PACKETS_QUEUE % net._packetsDropped == 0 or net._packetsDropped % MAX_PACKETS_QUEUE == 0 then
+		if not net._nextPacketDropWarn or net._packetsDropped >= net._nextPacketDropWarn then
+			net._nextPacketDropWarn = (net._nextPacketDropWarn or 1) * 2
 			warn(
-				`Net "{net.Name}" has queued packets and met the limit of {MAX_PACKETS_QUEUE}. Did you just forget to connect? ({net._packetsDropped} Dropped.)`
+				`[CNet]: Discarded packet for "{net.Name}" cause it's queued too much packets. Did you just forget to connect? ({net._packetsDropped} Dropped.)`
 			)
 			return
 		end
@@ -63,23 +72,56 @@ local function queuePacketToNet(net: Net, packet: any)
 	table.insert(net._queuedPackets, packet)
 end
 
+local function setPlayersPacket(player: Player, unreliable: boolean?)
+	local packet = playerPackets[player] or {
+		b = buffer.create(BYTES_PER_FRAMES),
+		offset = 0,
+		unreliB = unreliable and buffer.create(BYTES_PER_FRAMES) or nil,
+		unreliOffset = unreliable and 0 or nil,
+	}
+	
+	playerPackets[player] = packet
+	return packet
+end
+
 local function processServerPackets()
-	remote:FireAllClients(globalPackets)
-	globalPackets = buffer.create(BYTES_PER_FRAMES)
-	globalPacketOffset = 0
+	if readu8(globalPackets, 0) ~= 0 then
+		remote:FireServer(globalPackets)
+		globalPackets = buffer.create(BYTES_PER_FRAMES)
+		globalPacketOffset = 0
+	end
+	
+	if readu8(unreliablePackets, 0) ~= 0 then
+		unreliableRemote:FireServer(unreliablePackets)
+		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
+		unreliPacketOffset = 0
+	end
 
 	-- process player packets
 	for player, packet in playerPackets do
 		remote:FireClient(player, packet.b)
+		
+		if packet.unreliB then
+			unreliableRemote:FireClient(player, packet.unreliB)
+		end
+		
 	end
 
 	table.clear(playerPackets)
 end
 
 local function processClientPackets()
-	remote:FireServer(globalPackets)
-	globalPackets = buffer.create(BYTES_PER_FRAMES)
-	globalPacketOffset = 0
+	if readu8(globalPackets, 0) ~= 0 then
+		remote:FireServer(globalPackets)
+		globalPackets = buffer.create(BYTES_PER_FRAMES)
+		globalPacketOffset = 0
+	end
+	
+	if readu8(unreliablePackets, 0) ~= 0 then
+		unreliableRemote:FireServer(unreliablePackets)
+		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
+		unreliPacketOffset = 0
+	end
 end
 
 local function onPacketReceived(packets: buffer, player: Player?)
@@ -236,6 +278,8 @@ end
 
 -- Changes the net to response net, like RemoteFunction
 function class:Response(...)
+	assert(not self._unreliable, `This net ({self.Name}) is a unreliable net, you can't set it as response net.`)
+	
 	self._response = true
 
 	self._eventListeners = nil
@@ -246,15 +290,31 @@ function class:Response(...)
 	return self
 end
 
+function class:Unreliable()
+	assert(not self._response, `This net ({self.Name}) is a response net, you can't set it as unreliable net.`)
+	
+	self._unreliable = true
+	
+	return self
+end
+
 function class:Fire(player, ...)
-	playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
-	local b = playerPackets[player].b
-	local offset = playerPackets[player].offset
+	local isNetUnreliable = self._unreliable
+	
+	local thisPlayersPacket = setPlayersPacket(player, isNetUnreliable)
+	local b = isNetUnreliable and thisPlayersPacket.unreliB or thisPlayersPacket.b
+	local offset = isNetUnreliable and thisPlayersPacket.unreliOffset or thisPlayersPacket.offset
 
 	local datas = { ... }
 
 	buffer.writeu8(b, offset, self._id)
-	playerPackets[player].offset = serialize(playerPackets[player].b, offset + 1, datas, self._dataTypes) + 1
+	local newOffset = serialize(b, offset + 1, datas, self._dataTypes) + 1
+	
+	if isNetUnreliable then
+		thisPlayersPacket.unreliOffset = newOffset
+	else
+		thisPlayersPacket.offset = newOffset
+	end
 end
 
 function class:FireAll(...)
@@ -335,15 +395,25 @@ end
 if RunService:IsServer() then
 	remote = Instance.new("RemoteEvent")
 	remote.Parent = script
+	
+	unreliableRemote = Instance.new("UnreliableRemoteEvent")
+	unreliableRemote.Parent = script
 
 	playerPackets = {}
 
 	RunService.Heartbeat:Connect(processServerPackets)
+	
+	unreliableRemote.OnServerEvent:Connect(function(player, packet)
+		onPacketReceived(packet, player)
+	end)
 	remote.OnServerEvent:Connect(function(player, packet)
 		onPacketReceived(packet, player)
 	end)
 else
 	remote = script:WaitForChild("RemoteEvent")
+	unreliableRemote = script:WaitForChild("UnreliableRemoteEvent")
+	
+	unreliableRemote.OnClientEvent:Connect(onPacketReceived)
 	remote.OnClientEvent:Connect(onPacketReceived)
 	RunService.Heartbeat:Connect(processClientPackets)
 end
@@ -360,17 +430,23 @@ export type Net = {
 
 	_queuedPackets: { any },
 	_packetsDropped: number,
+	_nextPacketDropWarn: number?,
 
-	_response: boolean,
+	_response: boolean?,
+	_unreliable: boolean?,
+	
 	_waitingForResponse: thread?,
 	_onInvoke: (...any) -> (...any)?,
 
 	-- constructors
 	new: (netName: string, ...DataTypes.DataType) -> Net,
 	Response: (self: Net, ...DataTypes.DataType) -> Net,
+	Unreliable: ( self: Net ) -> Net,
 
 	-- speaker methods
-	Fire: (self: Net, player: Player, ...any) -> ...any?,
+	Fire: (self: Net, player: Player, ...any) -> (),
+	FireAll: ( self: Net, ...any ) -> (),	
+	
 	InvokeClient: (self: Net, player: Player, ...any) -> ...any,
 	InvokeServer: (self: Net, ...any) -> ...any,
 	OnInvoke: (self: Net, func: () -> () ) -> (),
