@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 local DataTypes = require(script.DataTypes)
 
 local readu8 = buffer.readu8
+local writeu8 = buffer.writeu8
 
 local idCounter = 1
 
@@ -57,7 +58,7 @@ end
 local function queuePacketToNet(net: Net, packet: any)
 	local maxPacketsInQueue = net._unreliable and 1 or MAX_PACKETS_QUEUE
 	
-	if #net._queuedPackets >= MAX_PACKETS_QUEUE then
+	if #net._queuedPackets >= maxPacketsInQueue then
 		net._packetsDropped += 1
 
 		if not net._nextPacketDropWarn or net._packetsDropped >= net._nextPacketDropWarn then
@@ -84,15 +85,15 @@ local function setPlayersPacket(player: Player, unreliable: boolean?)
 	return packet
 end
 
-local function processServerPackets()
+local function processPacketsToClient()
 	if readu8(globalPackets, 0) ~= 0 then
-		remote:FireServer(globalPackets)
+		remote:FireAllClients(globalPackets)
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
 	
 	if readu8(unreliablePackets, 0) ~= 0 then
-		unreliableRemote:FireServer(unreliablePackets)
+		unreliableRemote:FireAllClients(unreliablePackets)
 		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
 		unreliPacketOffset = 0
 	end
@@ -110,7 +111,7 @@ local function processServerPackets()
 	table.clear(playerPackets)
 end
 
-local function processClientPackets()
+local function processPacketsToServer()
 	if readu8(globalPackets, 0) ~= 0 then
 		remote:FireServer(globalPackets)
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
@@ -320,8 +321,13 @@ end
 function class:FireAll(...)
 	local datas = { ... }
 
-	buffer.writeu8(globalPackets, globalPacketOffset, self._id)
-	globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes) + 1
+	if self._unreliable then
+		writeu8(unreliablePackets, unreliPacketOffset, self._id)
+		unreliPacketOffset = serialize(unreliablePackets, unreliPacketOffset + 1, datas, self._dataTypes) + 1
+	else
+		writeu8(globalPackets, globalPacketOffset, self._id)
+		globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes) + 1
+	end
 end
 
 function class:Connect(func)
@@ -401,7 +407,7 @@ if RunService:IsServer() then
 
 	playerPackets = {}
 
-	RunService.Heartbeat:Connect(processServerPackets)
+	RunService.Heartbeat:Connect(processPacketsToClient)
 	
 	unreliableRemote.OnServerEvent:Connect(function(player, packet)
 		onPacketReceived(packet, player)
@@ -415,7 +421,7 @@ else
 	
 	unreliableRemote.OnClientEvent:Connect(onPacketReceived)
 	remote.OnClientEvent:Connect(onPacketReceived)
-	RunService.Heartbeat:Connect(processClientPackets)
+	RunService.Heartbeat:Connect(processPacketsToServer)
 end
 
 export type Net = {
