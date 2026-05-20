@@ -69,6 +69,14 @@
                   ]
                 }
               ]
+            },
+            {
+              "name": "Schema",
+              "className": "ModuleScript",
+              "guid": "17659280",
+              "filePaths": [
+                "sync/ReplicatedStorage/CNet/Schema.luau"
+              ]
             }
           ]
         },

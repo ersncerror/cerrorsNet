@@ -7,7 +7,7 @@ local writeu8 = buffer.writeu8
 
 local idCounter = 1
 
-local BYTES_PER_FRAMES = 256 -- every frames can hold for 256 bytes.
+local BYTES_PER_FRAMES = 128 -- every frames can hold for x bytes.
 local MAX_PACKETS_QUEUE = 128
 
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
@@ -51,7 +51,7 @@ local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {Da
 		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
 		offset += offsetIncreased
 	end
-
+	
 	return offset
 end
 
@@ -130,7 +130,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 
 	local offset = 0
 
-	local packetId = buffer.readu8(packets, offset)
+	local packetId = readu8(packets, offset)
 	while packetId ~= 0 do
 		local net = netsById[packetId]
 		offset += 1
@@ -154,7 +154,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 				local oldOffset = bOffset
 				
 				buffer.writeu8(targetBuffer, bOffset, net._id)
-				bOffset = serialize( targetBuffer, bOffset + 1, {net._onInvoke( unpack(unSerializedPacket) )}, net._reponseDataTypes ) + 1
+				bOffset = serialize( targetBuffer, bOffset + 1, {net._onInvoke( unpack(unSerializedPacket) )}, net._reponseDataTypes )
 
 				if player then
 					playerPackets[player].offset = bOffset
@@ -188,7 +188,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 			end
 		end
 
-		packetId = buffer.readu8(packets, offset)
+		packetId = readu8(packets, offset)
 	end
 
 	debug.profileend()
@@ -228,7 +228,7 @@ function class:InvokeServer(...)
 	local datas = { ... }
 
 	buffer.writeu8(globalPackets, globalPacketOffset, self._id)
-	globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes) + 1 
+	globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
@@ -243,7 +243,7 @@ function class:InvokeClient(player, ...)
 	local datas = { ... }
 
 	buffer.writeu8(b, offset, self._id)
-	playerPackets[player].offset = serialize(b, offset + 1, datas, self._dataTypes) + 1 
+	playerPackets[player].offset = serialize(b, offset + 1, datas, self._dataTypes)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
@@ -258,7 +258,7 @@ function class:OnInvoke(func: () -> ())
 			
 			if RunService:IsClient() then
 				buffer.writeu8(globalPackets, globalPacketOffset, self._id)
-				globalPacketOffset = serialize( globalPackets, globalPacketOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes ) + 1
+				globalPacketOffset = serialize( globalPackets, globalPacketOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes )
 			else
 				local player = packet[1]
 
@@ -267,7 +267,7 @@ function class:OnInvoke(func: () -> ())
 				local bOffset = playerPackets[player].offset 
 
 				buffer.writeu8(targetBuffer, bOffset, self._id)
-				bOffset = serialize( targetBuffer, bOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes ) + 1
+				bOffset = serialize( targetBuffer, bOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes )
 
 				playerPackets[player].offset = bOffset
 			end
@@ -279,7 +279,7 @@ end
 
 -- Changes the net to response net, like RemoteFunction
 function class:Response(...)
-	assert(not self._unreliable, `This net ({self.Name}) is a unreliable net, you can't set it as response net.`)
+	assert(not self._unreliable, `This net ({self.Name}) is a unreliable net, you can't set it to a response net.`)
 	
 	self._response = true
 
@@ -291,8 +291,9 @@ function class:Response(...)
 	return self
 end
 
+-- Changes the net to unreliable net, like UnreliableRemoteEvent
 function class:Unreliable()
-	assert(not self._response, `This net ({self.Name}) is a response net, you can't set it as unreliable net.`)
+	assert(not self._response, `This net ({self.Name}) is a response net, you can't set it to a unreliable net.`)
 	
 	self._unreliable = true
 	
@@ -309,8 +310,8 @@ function class:Fire(player, ...)
 	local datas = { ... }
 
 	buffer.writeu8(b, offset, self._id)
-	local newOffset = serialize(b, offset + 1, datas, self._dataTypes) + 1
-	
+	local newOffset = serialize(b, offset + 1, datas, self._dataTypes) 
+
 	if isNetUnreliable then
 		thisPlayersPacket.unreliOffset = newOffset
 	else
@@ -323,10 +324,10 @@ function class:FireAll(...)
 
 	if self._unreliable then
 		writeu8(unreliablePackets, unreliPacketOffset, self._id)
-		unreliPacketOffset = serialize(unreliablePackets, unreliPacketOffset + 1, datas, self._dataTypes) + 1
+		unreliPacketOffset = serialize(unreliablePackets, unreliPacketOffset + 1, datas, self._dataTypes)
 	else
 		writeu8(globalPackets, globalPacketOffset, self._id)
-		globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes) + 1
+		globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes)
 	end
 end
 

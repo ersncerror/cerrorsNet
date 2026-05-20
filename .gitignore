@@ -1,2 +1,5 @@
 *.rbxl
 *.rbxl.lock
+
+# This is because selene doesn't have readbits/writebits, it will report the issue even the function exists.
+*roblox.yml

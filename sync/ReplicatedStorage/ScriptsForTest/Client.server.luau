@@ -1,7 +1,13 @@
 local net = require(game.ReplicatedStorage.CNet)
+local Schema = require(game.ReplicatedStorage.CNet.Schema)
 
-local newNet = net.new("hello", net.DataTypes.u8):Unreliable()
+local newSchema = Schema.new({
+	Hello = net.DataTypes.u8,
+	World = net.DataTypes.u8
+})
 
-newNet:Connect(function(number)
-	print(number)
+local newNet = net.new("hello", newSchema)
+
+newNet:Connect(function(t)
+	print(t)
 end)
