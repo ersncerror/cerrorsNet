@@ -13,7 +13,7 @@ local copyb = buffer.copy
 
 local idCounter = 1
 
-local BYTES_PER_FRAMES = 256 -- every frames can hold for x bytes.
+local BYTES_PER_FRAMES = 2048 -- every frames can hold for x bytes.
 local MAX_PACKETS_QUEUE = 128
 
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
@@ -22,11 +22,11 @@ local globalPacketOffset = 0
 local unreliablePackets = buffer.create(BYTES_PER_FRAMES)
 local unreliPacketOffset = 0
 
-local playerPackets : { [Player]: { b: buffer, offset: number, unreliB: buffer?, unreliOffset: number? } }
+local playerPackets: { [Player]: { b: buffer, offset: number, unreliB: buffer?, unreliOffset: number? } }
 local invokingPackets = {}
 
 local remote: RemoteEvent
-local unreliableRemote : UnreliableRemoteEvent
+local unreliableRemote: UnreliableRemoteEvent
 
 local nets = {}
 local netsById = {} :: { [number]: Net }
@@ -37,7 +37,7 @@ class.__index = class
 class.DataTypes = DataTypes
 class.Schema = Schema
 
-local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})	
+local function unSerialize(t: { any }, offset: number, packet: buffer, dataTypes: { DataTypes.DataType })
 	local unSerializedPacket = t or {}
 
 	for _, dataType in dataTypes do
@@ -49,33 +49,32 @@ local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: 
 	return unSerializedPacket, offset
 end
 
-local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {DataTypes.DataType})	
+local function serialize(b: buffer, offset: number, datas: { any }, dataTypes: { DataTypes.DataType })
 	if #datas ~= #dataTypes then
-		warn(`[CNet]: Possibly bug detected. Expect to serialize {#dataTypes} data types, but got {#datas} datas types to serialize.`)
+		warn(
+			`[CNet]: Possibly bug detected. Expect to serialize {#dataTypes} data types, but got {#datas} datas types to serialize.`
+		)
 	end
-	
+
 	for i, dataInterperter in dataTypes do
 		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
 		offset += offsetIncreased
 	end
-	
+
 	return offset
 end
 
-local function writeInPacket(packet: buffer, offset: number, net: Net, datas: {any}, _response: boolean?)
+local function writeInPacket(packet: buffer, offset: number, net: Net, datas: { any }, _response: boolean?)
 	writeu8(packet, offset, net._id)
 	local newOffset = serialize(packet, offset + 3, datas, _response and net._responseDataTypes or net._dataTypes)
 	writeu16(packet, offset + 1, newOffset - offset - 3)
-	-- write packet id in first offset
-	-- gets the content length
-	-- write the packet length on second offset
 
 	return newOffset
 end
 
 local function queuePacketToNet(net: Net, packet: any)
 	local maxPacketsInQueue = net._unreliable and 1 or MAX_PACKETS_QUEUE
-	
+
 	if #net._queuedPackets >= maxPacketsInQueue then
 		net._packetsDropped += 1
 
@@ -92,13 +91,14 @@ local function queuePacketToNet(net: Net, packet: any)
 end
 
 local function setPlayersPacket(player: Player, unreliable: boolean?)
-	local packet = playerPackets[player] or {
-		b = buffer.create(BYTES_PER_FRAMES),
-		offset = 0,
-		unreliB = unreliable and buffer.create(BYTES_PER_FRAMES) or nil,
-		unreliOffset = unreliable and 0 or nil,
-	}
-	
+	local packet = playerPackets[player]
+		or {
+			b = buffer.create(BYTES_PER_FRAMES),
+			offset = 0,
+			unreliB = unreliable and buffer.create(BYTES_PER_FRAMES) or nil,
+			unreliOffset = unreliable and 0 or nil,
+		}
+
 	playerPackets[player] = packet
 	return packet
 end
@@ -109,7 +109,7 @@ local function processPacketsToClient()
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
-	
+
 	if readu8(unreliablePackets, 0) ~= 0 then
 		unreliableRemote:FireAllClients(unreliablePackets)
 		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
@@ -119,11 +119,10 @@ local function processPacketsToClient()
 	-- process player packets
 	for player, packet in playerPackets do
 		remote:FireClient(player, packet.b)
-		
+
 		if packet.unreliB then
 			unreliableRemote:FireClient(player, packet.unreliB)
 		end
-		
 	end
 
 	table.clear(playerPackets)
@@ -135,7 +134,7 @@ local function processPacketsToServer()
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
-	
+
 	if readu8(unreliablePackets, 0) ~= 0 then
 		unreliableRemote:FireServer(unreliablePackets)
 		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
@@ -152,9 +151,14 @@ local function onPacketReceived(packets: buffer, player: Player?)
 	while packetId ~= 0 do
 		local net = netsById[packetId]
 		local length = readu16(packets, offset + 1)
-		offset += 3
+		offset += 3 -- theres a byte of packet length behind the id
 
-		local unSerializedPacket = unSerialize({player}, offset, packets, net._dataTypes)
+		if not net then
+			warn(`{offset} offset, content: {readu8(packets, offset)}`)
+			warn(`next: {offset + 1}, content: {readu8(packets, offset + 1)}`)
+		end
+
+		local unSerializedPacket = unSerialize({ player }, offset, packets, net._dataTypes)
 		offset += length
 
 		if net._response then
@@ -171,18 +175,21 @@ local function onPacketReceived(packets: buffer, player: Player?)
 				local targetBuffer = player and playerPackets[player].b or globalPackets
 				local bOffset = player and playerPackets[player].offset or globalPacketOffset
 				local oldOffset = bOffset
-				
-				local data = {net._onInvoke( unpack(unSerializedPacket) )}
 
-				bOffset = writeInPacket(targetBuffer, bOffset, net, data, true)
+				buffer.writeu8(targetBuffer, bOffset, net._id)
+				bOffset = serialize(
+					targetBuffer,
+					bOffset + 1,
+					{ net._onInvoke(unpack(unSerializedPacket)) },
+					net._responseDataTypes
+				)
 
 				if player then
 					playerPackets[player].offset = bOffset
 				else
 					globalPacketOffset = bOffset
-					offset += bOffset - oldOffset 
+					offset += bOffset - oldOffset
 				end
-
 			else
 				invokingPackets[net._id] = nil
 				task.spawn(net._waitingForResponse, unpack(unSerializedPacket))
@@ -261,7 +268,7 @@ function class:InvokeClient(player, ...)
 
 	local datas = { ... }
 
-	playerPackets[player].offset = writeInPacket(b, offset, self, datas)
+	playerPackets[player].offset = writeInPacket(b, offset + 1, self, datas)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
@@ -270,19 +277,18 @@ end
 
 function class:OnInvoke(func: () -> ())
 	self._onInvoke = func
-	
-	if #self._queuedPackets > 0 then		
+
+	if #self._queuedPackets > 0 then
 		for _, packet in self._queuedPackets do
-			
 			if RunService:IsClient() then
-				local data = {self._onInvoke( unpack(packet) )}
+				local data = { self._onInvoke(unpack(packet)) }
 				globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, data, true)
 			else
 				local player = packet[1]
 
 				playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
-				local targetBuffer =  playerPackets[player].b
-				local bOffset = playerPackets[player].offset 
+				local targetBuffer = playerPackets[player].b
+				local bOffset = playerPackets[player].offset
 
 				local data = { self._onInvoke(unpack(packet)) }
 				bOffset = writeInPacket(targetBuffer, bOffset, self, data, true)
@@ -290,21 +296,19 @@ function class:OnInvoke(func: () -> ())
 				playerPackets[player].offset = bOffset
 			end
 		end
-		
 	end
-
 end
 
 -- Changes the net to response net, like RemoteFunction
 function class:Response(...)
 	assert(not self._unreliable, `This net ({self.Name}) is a unreliable net, you can't set it to a response net.`)
-	
+
 	self._response = true
 
 	self._eventListeners = nil
 	self._eventListenerCount = nil
 
-	self._responseDataTypes = {...}
+	self._responseDataTypes = { ... }
 
 	return self
 end
@@ -312,15 +316,15 @@ end
 -- Changes the net to unreliable net, like UnreliableRemoteEvent
 function class:Unreliable()
 	assert(not self._response, `This net ({self.Name}) is a response net, you can't set it to a unreliable net.`)
-	
+
 	self._unreliable = true
-	
+
 	return self
 end
 
 function class:Fire(player, ...)
 	local isNetUnreliable = self._unreliable
-	
+
 	local thisPlayersPacket = setPlayersPacket(player, isNetUnreliable)
 	local b = isNetUnreliable and thisPlayersPacket.unreliB or thisPlayersPacket.b
 	local offset = isNetUnreliable and thisPlayersPacket.unreliOffset or thisPlayersPacket.offset
@@ -417,14 +421,14 @@ end
 if RunService:IsServer() then
 	remote = Instance.new("RemoteEvent")
 	remote.Parent = script
-	
+
 	unreliableRemote = Instance.new("UnreliableRemoteEvent")
 	unreliableRemote.Parent = script
 
 	playerPackets = {}
 
 	RunService.Heartbeat:Connect(processPacketsToClient)
-	
+
 	unreliableRemote.OnServerEvent:Connect(function(player, packet)
 		onPacketReceived(packet, player)
 	end)
@@ -434,7 +438,7 @@ if RunService:IsServer() then
 else
 	remote = script:WaitForChild("RemoteEvent")
 	unreliableRemote = script:WaitForChild("UnreliableRemoteEvent")
-	
+
 	unreliableRemote.OnClientEvent:Connect(onPacketReceived)
 	remote.OnClientEvent:Connect(onPacketReceived)
 	RunService.Heartbeat:Connect(processPacketsToServer)
@@ -457,23 +461,23 @@ export type Net = {
 
 	_response: boolean?,
 	_unreliable: boolean?,
-	
+
 	_waitingForResponse: thread?,
-	_onInvoke: (...any) -> (...any)?,
+	_onInvoke: (...any) -> ...any?,
 
 	-- constructors
 	new: (netName: string, ...DataTypes.DataType) -> Net,
 	Response: (self: Net, ...DataTypes.DataType) -> Net,
-	Unreliable: ( self: Net ) -> Net,
+	Unreliable: (self: Net) -> Net,
 
 	-- speaker methods
 	Fire: (self: Net, player: Player, ...any) -> (),
-	FireAll: ( self: Net, ...any ) -> (),	
-	
+	FireAll: (self: Net, ...any) -> (),
+
 	InvokeClient: (self: Net, player: Player, ...any) -> ...any,
 	InvokeServer: (self: Net, ...any) -> ...any,
-	OnInvoke: (self: Net, func: () -> () ) -> (),
-	
+	OnInvoke: (self: Net, func: () -> ()) -> (),
+
 	-- listen methods
 	Connect: (self: Net, func: (...any) -> ()) -> { Disconnect: () -> () },
 	Once: (self: Net, func: (...any) -> ()) -> (),
