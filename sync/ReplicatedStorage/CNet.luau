@@ -37,6 +37,13 @@ class.__index = class
 class.DataTypes = DataTypes
 class.Schema = Schema
 
+local function abstractPacket(source: buffer, targetOffset: number)
+	local abstractedPacket = buffer.create(globalPacketOffset + 1)
+	copyb(abstractedPacket, 0, source, 0, targetOffset)
+
+	return abstractedPacket
+end
+
 local function unSerialize(t: { any }, offset: number, packet: buffer, dataTypes: { DataTypes.DataType })
 	local unSerializedPacket = t or {}
 
@@ -104,24 +111,27 @@ local function setPlayersPacket(player: Player, unreliable: boolean?)
 end
 
 local function processPacketsToClient()
-	if readu8(globalPackets, 0) ~= 0 then
-		remote:FireAllClients(globalPackets)
+	if globalPacketOffset > 0 then
+		local a = abstractPacket(globalPackets, globalPacketOffset)
+		print(buffer.len(a))
+
+		remote:FireAllClients(a)
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
 
-	if readu8(unreliablePackets, 0) ~= 0 then
-		unreliableRemote:FireAllClients(unreliablePackets)
+	if unreliPacketOffset > 0 then
+		unreliableRemote:FireAllClients(abstractPacket(unreliablePackets, unreliPacketOffset))
 		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
 		unreliPacketOffset = 0
 	end
 
 	-- process player packets
 	for player, packet in playerPackets do
-		remote:FireClient(player, packet.b)
+		remote:FireClient(player, abstractPacket(packet.b, packet.offset))
 
 		if packet.unreliB then
-			unreliableRemote:FireClient(player, packet.unreliB)
+			unreliableRemote:FireClient(player, abstractPacket(packet.unreliB, packet.unreliOffset))
 		end
 	end
 
@@ -129,14 +139,14 @@ local function processPacketsToClient()
 end
 
 local function processPacketsToServer()
-	if readu8(globalPackets, 0) ~= 0 then
-		remote:FireServer(globalPackets)
+	if globalPacketOffset > 0 then
+		remote:FireServer(abstractPacket(globalPackets, globalPacketOffset))
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
 
-	if readu8(unreliablePackets, 0) ~= 0 then
-		unreliableRemote:FireServer(unreliablePackets)
+	if unreliPacketOffset > 0 then
+		unreliableRemote:FireServer(abstractPacket(unreliablePackets, unreliPacketOffset))
 		unreliablePackets = buffer.create(BYTES_PER_FRAMES)
 		unreliPacketOffset = 0
 	end
@@ -148,15 +158,10 @@ local function onPacketReceived(packets: buffer, player: Player?)
 	local offset = 0
 
 	local packetId = readu8(packets, offset)
-	while packetId ~= 0 do
+	while packetId ~= 0 and offset < buffer.len(packets) do
 		local net = netsById[packetId]
 		local length = readu16(packets, offset + 1)
 		offset += 3 -- theres a byte of packet length behind the id
-
-		if not net then
-			warn(`{offset} offset, content: {readu8(packets, offset)}`)
-			warn(`next: {offset + 1}, content: {readu8(packets, offset + 1)}`)
-		end
 
 		local unSerializedPacket = unSerialize({ player }, offset, packets, net._dataTypes)
 		offset += length

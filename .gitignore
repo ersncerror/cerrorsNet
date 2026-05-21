@@ -1,4 +1,6 @@
 *.rbxl
+!playground/**/*.rbxl
+
 *.rbxl.lock
 
 # Since selene is no longer update and buffer.readbits/writebits didn't record in the standard library
