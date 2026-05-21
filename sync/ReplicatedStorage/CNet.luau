@@ -5,6 +5,10 @@ local Schema = require(script.Schema)
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
+
+local readu16 = buffer.readu16
+local writeu16 = buffer.writeu16
+
 local copyb = buffer.copy
 
 local idCounter = 1
@@ -60,17 +64,8 @@ end
 
 local function writeInPacket(packet: buffer, offset: number, net: Net, datas: {any}, _response: boolean?)
 	writeu8(packet, offset, net._id)
-	local newOffset = serialize(packet, offset + 2, datas, _response and net._responseDataTypes or net._dataTypes)
-	writeu8(packet, offset + 1, newOffset - offset - 2)
-
-	-- 0
-	-- 2 + 10
-	-- 12 - ( 0 + 1 )
-	-- 11
-
-	-- 0 | 1 | | 2 ~ 10
-	-- packetId | 11 | 10
-
+	local newOffset = serialize(packet, offset + 3, datas, _response and net._responseDataTypes or net._dataTypes)
+	writeu16(packet, offset + 1, newOffset - offset - 3)
 	-- write packet id in first offset
 	-- gets the content length
 	-- write the packet length on second offset
@@ -156,8 +151,8 @@ local function onPacketReceived(packets: buffer, player: Player?)
 	local packetId = readu8(packets, offset)
 	while packetId ~= 0 do
 		local net = netsById[packetId]
-		local length = readu8(packets, offset + 1)
-		offset += 2 -- theres a byte of packet length behind the id
+		local length = readu16(packets, offset + 1)
+		offset += 3
 
 		local unSerializedPacket = unSerialize({player}, offset, packets, net._dataTypes)
 		offset += length
