@@ -10,6 +10,8 @@ local newNet = net.new("hello", newSchema)
 
 local player = game.Players:FindFirstChildOfClass("Player") or game.Players.PlayerAdded:Wait()
 
+task.wait(20)
+
 for i = 1, 5 do
 	newNet:Fire(player, {
 		Hello = i,

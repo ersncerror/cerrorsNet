@@ -1,13 +1,15 @@
 local RunService = game:GetService("RunService")
 
 local DataTypes = require(script.DataTypes)
+local Schema = require(script.Schema)
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
+local copyb = buffer.copy
 
 local idCounter = 1
 
-local BYTES_PER_FRAMES = 128 -- every frames can hold for x bytes.
+local BYTES_PER_FRAMES = 256 -- every frames can hold for x bytes.
 local MAX_PACKETS_QUEUE = 128
 
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
@@ -29,6 +31,7 @@ local class = {} :: Net
 class.__index = class
 
 class.DataTypes = DataTypes
+class.Schema = Schema
 
 local function unSerialize(t: {any}, offset: number, packet: buffer, dataTypes: {DataTypes.DataType})	
 	local unSerializedPacket = t or {}
@@ -53,6 +56,26 @@ local function serialize(b: buffer, offset: number, datas: {any}, dataTypes: {Da
 	end
 	
 	return offset
+end
+
+local function writeInPacket(packet: buffer, offset: number, net: Net, datas: {any}, _response: boolean?)
+	writeu8(packet, offset, net._id)
+	local newOffset = serialize(packet, offset + 2, datas, _response and net._responseDataTypes or net._dataTypes)
+	writeu8(packet, offset + 1, newOffset - offset - 2)
+
+	-- 0
+	-- 2 + 10
+	-- 12 - ( 0 + 1 )
+	-- 11
+
+	-- 0 | 1 | | 2 ~ 10
+	-- packetId | 11 | 10
+
+	-- write packet id in first offset
+	-- gets the content length
+	-- write the packet length on second offset
+
+	return newOffset
 end
 
 local function queuePacketToNet(net: Net, packet: any)
@@ -133,10 +156,11 @@ local function onPacketReceived(packets: buffer, player: Player?)
 	local packetId = readu8(packets, offset)
 	while packetId ~= 0 do
 		local net = netsById[packetId]
-		offset += 1
+		local length = readu8(packets, offset + 1)
+		offset += 2 -- theres a byte of packet length behind the id
 
-		local unSerializedPacket, newOffset = unSerialize({player}, offset, packets, net._dataTypes)
-		offset = newOffset
+		local unSerializedPacket = unSerialize({player}, offset, packets, net._dataTypes)
+		offset += length
 
 		if net._response then
 			if not invokingPackets[net._id] then
@@ -153,8 +177,9 @@ local function onPacketReceived(packets: buffer, player: Player?)
 				local bOffset = player and playerPackets[player].offset or globalPacketOffset
 				local oldOffset = bOffset
 				
-				buffer.writeu8(targetBuffer, bOffset, net._id)
-				bOffset = serialize( targetBuffer, bOffset + 1, {net._onInvoke( unpack(unSerializedPacket) )}, net._reponseDataTypes )
+				local data = {net._onInvoke( unpack(unSerializedPacket) )}
+
+				bOffset = writeInPacket(targetBuffer, bOffset, net, data, true)
 
 				if player then
 					playerPackets[player].offset = bOffset
@@ -227,8 +252,7 @@ end
 function class:InvokeServer(...)
 	local datas = { ... }
 
-	buffer.writeu8(globalPackets, globalPacketOffset, self._id)
-	globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes)
+	globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, datas)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
@@ -242,8 +266,7 @@ function class:InvokeClient(player, ...)
 
 	local datas = { ... }
 
-	buffer.writeu8(b, offset, self._id)
-	playerPackets[player].offset = serialize(b, offset + 1, datas, self._dataTypes)
+	playerPackets[player].offset = writeInPacket(b, offset, self, datas)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
@@ -257,8 +280,8 @@ function class:OnInvoke(func: () -> ())
 		for _, packet in self._queuedPackets do
 			
 			if RunService:IsClient() then
-				buffer.writeu8(globalPackets, globalPacketOffset, self._id)
-				globalPacketOffset = serialize( globalPackets, globalPacketOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes )
+				local data = {self._onInvoke( unpack(packet) )}
+				globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, data, true)
 			else
 				local player = packet[1]
 
@@ -266,8 +289,8 @@ function class:OnInvoke(func: () -> ())
 				local targetBuffer =  playerPackets[player].b
 				local bOffset = playerPackets[player].offset 
 
-				buffer.writeu8(targetBuffer, bOffset, self._id)
-				bOffset = serialize( targetBuffer, bOffset + 1, {self._onInvoke( unpack(packet) )}, self._reponseDataTypes )
+				local data = { self._onInvoke(unpack(packet)) }
+				bOffset = writeInPacket(targetBuffer, bOffset, self, data, true)
 
 				playerPackets[player].offset = bOffset
 			end
@@ -286,7 +309,7 @@ function class:Response(...)
 	self._eventListeners = nil
 	self._eventListenerCount = nil
 
-	self._reponseDataTypes = {...}
+	self._responseDataTypes = {...}
 
 	return self
 end
@@ -309,8 +332,7 @@ function class:Fire(player, ...)
 
 	local datas = { ... }
 
-	buffer.writeu8(b, offset, self._id)
-	local newOffset = serialize(b, offset + 1, datas, self._dataTypes) 
+	local newOffset = writeInPacket(b, offset, self, datas)
 
 	if isNetUnreliable then
 		thisPlayersPacket.unreliOffset = newOffset
@@ -323,11 +345,9 @@ function class:FireAll(...)
 	local datas = { ... }
 
 	if self._unreliable then
-		writeu8(unreliablePackets, unreliPacketOffset, self._id)
-		unreliPacketOffset = serialize(unreliablePackets, unreliPacketOffset + 1, datas, self._dataTypes)
+		unreliPacketOffset = writeInPacket(unreliablePackets, unreliPacketOffset, self, datas)
 	else
-		writeu8(globalPackets, globalPacketOffset, self._id)
-		globalPacketOffset = serialize(globalPackets, globalPacketOffset + 1, datas, self._dataTypes)
+		globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, datas)
 	end
 end
 
@@ -427,10 +447,11 @@ end
 
 export type Net = {
 	DataTypes: DataTypes.List,
+	Schema: Schema.Schema,
 
 	_id: number,
 	_dataTypes: { DataTypes.DataType },
-	_reponseDataTypes: { DataTypes.DataType },
+	_responseDataTypes: { DataTypes.DataType },
 
 	_eventListeners: { () -> () },
 	_eventListenerCount: number,
