@@ -57,7 +57,7 @@ local function serialize(b: buffer, offset: number, datas: { any }, dataTypes: {
 	end
 
 	for i, dataInterperter in dataTypes do
-		local offsetIncreased = dataInterperter.write(b, offset, datas[i])
+		local offsetIncreased = dataInterperter.write(b, offset, datas[i]) or dataInterperter.bytes
 		offset += offsetIncreased
 	end
 
