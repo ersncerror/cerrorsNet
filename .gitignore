@@ -1,5 +1,8 @@
 *.rbxl
+!playground/**/*.rbxl
+
 *.rbxl.lock
 
-# This is because selene doesn't have readbits/writebits, it will report the issue even the function exists.
+# Since selene is no longer update and buffer.readbits/writebits didn't record in the standard library
+# I have to modify the library to stop selene reporting the issue from "incorrect_standard_library_use"
 *roblox.yml
