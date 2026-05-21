@@ -1,5 +1,6 @@
 local net = require(game.ReplicatedStorage.CNet)
-local Schema = require(game.ReplicatedStorage.CNet.Schema)
+
+task.wait(20)
 
 local newNet = net.new("hello", net.DataTypes.u8)
 

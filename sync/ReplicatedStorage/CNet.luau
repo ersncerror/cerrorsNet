@@ -31,6 +31,8 @@ local unreliableRemote: UnreliableRemoteEvent
 local nets = {}
 local netsById = {} :: { [number]: Net }
 
+local cachedPackets = {} :: { [number]: { b: buffer, player: Player? } } -- when net is not created and this packet is being decoding.
+
 local class = {} :: Net
 class.__index = class
 
@@ -112,10 +114,7 @@ end
 
 local function processPacketsToClient()
 	if globalPacketOffset > 0 then
-		local a = abstractPacket(globalPackets, globalPacketOffset)
-		print(buffer.len(a))
-
-		remote:FireAllClients(a)
+		remote:FireAllClients(abstractPacket(globalPackets, globalPacketOffset))
 		globalPackets = buffer.create(BYTES_PER_FRAMES)
 		globalPacketOffset = 0
 	end
@@ -152,6 +151,27 @@ local function processPacketsToServer()
 	end
 end
 
+local function sendPacketToListeners(net: Net, packet: {any})
+	if net._eventListenerCount > 0 then
+		local listener = net._eventListeners.next
+
+		while listener ~= net._eventListeners do
+			if listener.thread then
+				task.spawn(listener.thread, unpack(packet))
+				listener.previous.next = listener.next
+				listener.next.previous = listener.previous
+				listener._eventListenerCount -= 1
+			elseif listener.func then
+				task.spawn(listener.func, unpack(packet))
+			end
+
+			listener = listener.next
+		end
+	else
+		queuePacketToNet(net, packet)
+	end
+end
+
 local function onPacketReceived(packets: buffer, player: Player?)
 	debug.profilebegin("CNet_ProcessPackets")
 
@@ -162,6 +182,17 @@ local function onPacketReceived(packets: buffer, player: Player?)
 		local net = netsById[packetId]
 		local length = readu16(packets, offset + 1)
 		offset += 3 -- theres a byte of packet length behind the id
+
+		if not net then
+			cachedPackets[packetId] = cachedPackets[packetId] or {}
+			local cuttedBuffer = buffer.create(length + 1)
+			copyb(cuttedBuffer, 0, packets, offset, length)
+			table.insert(cachedPackets[packetId], {b = cuttedBuffer, player = player})
+
+			offset += length
+			packetId = readu8(packets, offset)
+			continue
+		end
 
 		local unSerializedPacket = unSerialize({ player }, offset, packets, net._dataTypes)
 		offset += length
@@ -200,24 +231,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 				task.spawn(net._waitingForResponse, unpack(unSerializedPacket))
 			end
 		else
-			if net._eventListenerCount > 0 then
-				local listener = net._eventListeners.next
-
-				while listener ~= net._eventListeners do
-					if listener.thread then
-						task.spawn(listener.thread, unpack(unSerializedPacket))
-						listener.previous.next = listener.next
-						listener.next.previous = listener.previous
-						listener._eventListenerCount -= 1
-					elseif listener.func then
-						task.spawn(listener.func, unpack(unSerializedPacket))
-					end
-
-					listener = listener.next
-				end
-			else
-				queuePacketToNet(net, unSerializedPacket)
-			end
+			sendPacketToListeners(net, unSerializedPacket)
 		end
 
 		packetId = readu8(packets, offset)
@@ -252,6 +266,16 @@ function class.new(netName, ...): Net
 
 	self._eventListeners.next = self._eventListeners
 	self._eventListeners.previous = self._eventListeners
+
+	-- check cached packets
+	if cachedPackets[self._id] then	
+		for _, packet in cachedPackets[self._id] do
+			local unSerializedData = unSerialize({cachedPackets[self._id].player}, 0, packet.b, self._dataTypes)
+			sendPacketToListeners(self, unSerializedData)
+		end
+
+		cachedPackets[self._id] = nil
+	end
 
 	return self
 end
