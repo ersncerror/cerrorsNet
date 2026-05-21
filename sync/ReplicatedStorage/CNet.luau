@@ -297,7 +297,7 @@ function class:InvokeClient(player, ...)
 
 	local datas = { ... }
 
-	playerPackets[player].offset = writeInPacket(b, offset + 1, self, datas)
+	playerPackets[player].offset = writeInPacket(b, offset, self, datas)
 
 	self._waitingForResponse = coroutine.running()
 	invokingPackets[self._id] = self
