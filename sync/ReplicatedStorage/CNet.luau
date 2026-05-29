@@ -112,6 +112,12 @@ local function setPlayersPacket(player: Player, unreliable: boolean?)
 	return packet
 end
 
+local function newConnection(func): Connection
+	return {
+		Disconnect = func
+	}
+end
+
 local function processPacketsToClient()
 	if globalPacketOffset > 0 then
 		remote:FireAllClients(abstractPacket(globalPackets, globalPacketOffset))
@@ -174,10 +180,13 @@ end
 
 local function onResponseTimeout(self: Net)
 	warn(`{self.Name} didn't get response before timeout.`, self._waitingForResponse)
+	local t, w = self._timeoutHandler, self._waitingForResponse
+
 	self._timeoutHandler = nil
-	local thread = self._waitingForResponse
-	self._waitingForResponse = nil 
-	task.spawn(thread)
+	self._waitingForResponse = nil
+
+	task.cancel(t)
+	task.spawn(w)
 end
 
 local function handleResponsePacket(net: Net, player: Player?, packet: { any })
@@ -208,11 +217,13 @@ local function handleResponsePacket(net: Net, player: Player?, packet: { any })
 			globalPacketOffset = offset
 		end
 	else
-		task.cancel(net._timeoutHandler)
-		task.spawn(net._waitingForResponse, unpack(packet))
+		local t, w = net._timeoutHandler, net._waitingForResponse
 		
 		net._timeoutHandler = nil
 		net._waitingForResponse = nil
+		
+		task.cancel(t)
+		task.spawn(w, unpack(packet))
 	end
 end
 
@@ -244,7 +255,9 @@ local function onPacketReceived(packets: buffer, player: Player?)
 		if net._response then
 			handleResponsePacket(net, player, unSerializedPacket)
 		else
-			table.insert(unSerializedPacket, 1, player)
+			if player then
+				table.insert(unSerializedPacket, 1, player)
+			end
 			sendPacketToListeners(net, unSerializedPacket)
 		end
 
@@ -437,13 +450,11 @@ function class:Connect(func)
 		table.clear(self._queuedPackets)
 	end
 
-	return {
-
-		Disconnect = function()
-			link.previous.next = link.next
-			link.next.previous = link.previous
-		end,
-	}
+	return newConnection(function()
+		link.previous.next = link.next
+		link.next.previous = link.previous
+		table.clear(link)
+		end)
 end
 
 function class:Once(func)
@@ -469,7 +480,15 @@ function class:Once(func)
 		self._eventListeners.next.previous = link
 		self._eventListeners.next = link
 		self._eventListenerCount += 1
+
+		return newConnection(function()
+			link.previous.next = link.next
+			link.next.previous = link.previous
+			table.clear(link)
+		end)
 	end
+
+	return
 end
 
 function class:Wait()
@@ -550,9 +569,13 @@ export type Net = {
 	OnInvoke: (self: Net, func: () -> ()) -> (),
 
 	-- listen methods
-	Connect: (self: Net, func: (...any) -> ()) -> { Disconnect: () -> () },
-	Once: (self: Net, func: (...any) -> ()) -> (),
-	Wait: (self: Net) -> any,
+	Connect: (self: Net, func: (...any) -> ()) -> Connection,
+	Once: (self: Net, func: (...any) -> ()) -> Connection?,
+	Wait: (self: Net) -> ...any,
+}
+
+export type Connection = {
+	Disconnect: ( self: Connection ) -> (),
 }
 
 return class
