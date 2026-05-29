@@ -1,6 +1,8 @@
-local dataTypes = {
-	u8 = require(script.u8)
-} :: List
+local dataTypes = {} :: List
+
+for _, dataType in script:GetChildren() do
+	dataTypes[dataType.Name] = require(dataType)
+end
 
 export type DataType = {
 	bytes: number,
