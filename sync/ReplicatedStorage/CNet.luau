@@ -89,14 +89,14 @@ end
 local function writeInPacket(packet: buffer, offset: number, net: Net, datas: { any }, _response: boolean?)
 	if offset + 3 >= BYTES_PER_FRAMES then
 		warn(
-			`[CNet]: Overflow detected, 3 bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames or increase the size in configuration.`
+			`[CNet]: Overflow detected, packet is at least required for 3 bytes, your packet may need more space to write. (space left:{BYTES_PER_FRAMES - offset}, fired by net "{net.Name}")`
 		)
 		return offset
 	end
 
 	local size = estimatePacketSize(datas, net._dataTypes)
 	if offset + 3 + size >= BYTES_PER_FRAMES then
-		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames or increase the size in configuration.`)
+		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, space lefts:{BYTES_PER_FRAMES - offset}. fired by net "{net.Name}".`)
 		return offset
 	end
 	
@@ -384,6 +384,14 @@ function class.new(netName, ...): Net
 	self._id = script:GetAttribute(netName) or idCounter
 	idCounter += script:GetAttribute(netName) and 0 or 1
 
+	if netsById[self._id] then
+		local newId = script:GetAttribute(netsById[self._id].Name) or idCounter
+		netsById[newId] = netsById[self._id]
+		netsById[newId]._id = newId
+		
+		idCounter += script:GetAttribute(netName) and 0 or 1
+	end
+
 	nets[netName] = self
 	netsById[self._id] = self
 
@@ -600,6 +608,13 @@ function class:Wait()
 	return coroutine.yield()
 end
 
+if BYTES_PER_FRAMES > 10000 and Configuration.WARN_BYTES_PER_FRAMES_TOO_BIG and RunService:IsServer() then
+	warn([[[CNet]: You have set BYTES_PER_FRAME over than 10000 bytes! 
+	Please make sure you really need a huge packet for this, higher than 10kb will possibly cause data loss.
+	(You can turn this warn off by set WARN_BYTES_PER_FRAMES_TOO_BIG to false in config.)
+	]])
+end
+
 if RunService:IsServer() then
 	remote = Instance.new("RemoteEvent")
 	remote.Parent = script
@@ -639,7 +654,9 @@ export type InvokeHandler = {
 export type Net = {
 	DataTypes: DataTypes.List,
 	Schema: Schema.Schema,
-
+	
+	Name: string,
+	
 	_id: number,
 	_dataTypes: { DataTypes.DataType },
 	_responseDataTypes: { DataTypes.DataType },
