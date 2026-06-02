@@ -178,15 +178,55 @@ local function sendPacketToListeners(net: Net, packet: { any })
 	end
 end
 
-local function onResponseTimeout(self: Net)
-	warn(`{self.Name} didn't get response before timeout.`, self._waitingForResponse)
-	local t, w = self._timeoutHandler, self._waitingForResponse
+local function invokeHandlerSetSuccessHandler(self: InvokeHandler, func: (...any) -> ())
+	assert(
+		typeof(func) == "function",
+		`[Invoke handler]: OnSuccess method, parameter 2 are expected to be function, but got {typeof(func)}.`
+	)
+	self._onInvoked = func
 
-	self._timeoutHandler = nil
-	self._waitingForResponse = nil
+	return self
+end
 
-	task.cancel(t)
-	task.spawn(w)
+local function invokeHandlerSetTimeoutHandler(self: InvokeHandler, func: (...any) -> ())
+	assert(
+		typeof(func) == "function",
+		`[Invoke handler]: OnTimeout method, parameter 2 are expected to be function, but got {typeof(func)}.`
+	)
+	self._onTimeout = func
+
+	return self
+end
+
+local function newInvokeHandler(timeout): InvokeHandler
+	local self = {} :: InvokeHandler
+
+	self.OnSuccess = invokeHandlerSetSuccessHandler
+	self.OnTimeout = invokeHandlerSetTimeoutHandler
+
+	self._thread = task.spawn(function()
+		local result = coroutine.yield()
+		local isTimeout = table.remove(result, 1)
+
+		if isTimeout and self._onTimeout then
+			task.spawn(self._onTimeout)
+		elseif self._onInvoked then
+			task.spawn(self._onInvoked, table.unpack(result))
+		end
+
+		self._thread = nil
+		
+		if coroutine.status(self._timeoutThread) ~= "normal" then
+			coroutine.close(self._timeoutThread)
+		end
+	end)
+
+	self._timeoutThread = task.delay(timeout, function()
+		task.spawn(self._thread, {true})
+		self._thread = nil
+	end)
+
+	return self
 end
 
 local function handleResponsePacket(net: Net, player: Player?, packet: { any })
@@ -196,6 +236,10 @@ local function handleResponsePacket(net: Net, player: Player?, packet: { any })
 	-- else, it will be the one where waiting for response.
 
 	if not net._waitingForResponse then
+		if player then
+			table.insert(packet, 1, player)
+		end
+
 		if not net._onInvoke then
 			queuePacketToNet(net, packet)
 			return
@@ -216,14 +260,20 @@ local function handleResponsePacket(net: Net, player: Player?, packet: { any })
 		else
 			globalPacketOffset = offset
 		end
-	else
-		local t, w = net._timeoutHandler, net._waitingForResponse
+	elseif net._waitingForResponse then
+		table.insert(packet, 1, false)
 		
-		net._timeoutHandler = nil
+		if player then
+			table.insert(packet, 2, player)
+		end
+
+		if not net._waitingForResponse._thread then
+			net._waitingForResponse = nil
+			return
+		end
+
+		task.spawn( net._waitingForResponse._thread, packet )
 		net._waitingForResponse = nil
-		
-		task.cancel(t)
-		task.spawn(w, unpack(packet))
 	end
 end
 
@@ -312,10 +362,8 @@ function class:InvokeServer(...)
 
 	globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, datas)
 
-	self._waitingForResponse = coroutine.running()
-	self._timeoutHandler = task.delay(self._timeout, onResponseTimeout, self)
-
-	return coroutine.yield()
+	self._waitingForResponse = newInvokeHandler(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:InvokeClient(player, ...)
@@ -333,9 +381,8 @@ function class:InvokeClient(player, ...)
 
 	playerPackets[player].offset = writeInPacket(b, offset, self, datas)
 
-	self._waitingForResponse = coroutine.running()
-	self._timeoutHandler = task.delay(self._timeout, onResponseTimeout, self)
-	return coroutine.yield()
+	self._waitingForResponse = newInvokeHandler(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:OnInvoke(func: () -> ())
@@ -531,6 +578,16 @@ else
 	RunService.Heartbeat:Connect(processPacketsToServer)
 end
 
+export type InvokeHandler = {
+	_thread: thread,
+	_timeoutThread: thread,
+	_onInvoked: (...any) -> (),
+	_onTimeout: (...any) -> (),
+
+	OnSuccess: (self: InvokeHandler, (...any) -> ()) -> ( InvokeHandler ),
+	OnTimeout: (self: InvokeHandler, (...any) -> ()) -> ( InvokeHandler ),
+}
+
 export type Net = {
 	DataTypes: DataTypes.List,
 	Schema: Schema.Schema,
@@ -549,8 +606,7 @@ export type Net = {
 	_response: boolean?,
 	_unreliable: boolean?,
 
-	_waitingForResponse: thread?,
-	_timeoutHandler: thread?,
+	_waitingForResponse: InvokeHandler?,
 	_onInvoke: (...any) -> ...any?,
 	_timeout: number?,
 
@@ -564,8 +620,8 @@ export type Net = {
 	Fire: (self: Net, player: Player, ...any) -> (),
 	FireAll: (self: Net, ...any) -> (),
 
-	InvokeClient: (self: Net, player: Player, ...any) -> (Player, ...any) | nil,
-	InvokeServer: (self: Net, ...any) -> (...any | nil),
+	InvokeClient: (self: Net, player: Player, ...any) -> InvokeHandler,
+	InvokeServer: (self: Net, ...any) -> InvokeHandler,
 	OnInvoke: (self: Net, func: () -> ()) -> (),
 
 	-- listen methods
