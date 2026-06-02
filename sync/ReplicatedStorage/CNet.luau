@@ -18,6 +18,8 @@ local BYTES_PER_FRAMES = Configuration.BYTES_PER_FRAMES -- every frames can hold
 local MAX_PACKETS_QUEUE = Configuration.MAX_PACKETS_QUEUE
 local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
 
+local estimateBuffer = buffer.create(BYTES_PER_FRAMES)
+
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
 local globalPacketOffset = 0
 
@@ -76,20 +78,26 @@ end
 
 local function estimatePacketSize(datas: { any }, dataTypes: { DataTypes.DataType })
 	local size = 0
-	local b = buffer.create(100)
 	
 	for i, dataInterperter in dataTypes do
-		size += dataInterperter.write(b, size, datas[i]) or dataInterperter.bytes
+		size += dataInterperter.write(estimateBuffer, size, datas[i]) or dataInterperter.bytes
 	end
 	
 	return size
 end
 
 local function writeInPacket(packet: buffer, offset: number, net: Net, datas: { any }, _response: boolean?)
+	if offset + 3 >= BYTES_PER_FRAMES then
+		warn(
+			`[CNet]: Overflow detected, 3 bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames or increase the size in configuration.`
+		)
+		return offset
+	end
+
 	local size = estimatePacketSize(datas, net._dataTypes)
 	if offset + 3 + size >= BYTES_PER_FRAMES then
-		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames.`)
-		return
+		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames or increase the size in configuration.`)
+		return offset
 	end
 	
 	writeu8(packet, offset, net._id)
@@ -323,7 +331,7 @@ local function onPacketReceived(packets: buffer, player: Player?)
 		offset += 3 -- theres 2 bytes of packet length behind the id
 		
 		-- CHECK BOUNDS BEFORE READING
-		if offset + 3 + length > buffer.len(packets) then
+		if offset + length > buffer.len(packets) then
 			warn(`[CNet]: Malformed packet, it's length ({length}) exceeds buffer bounds.`)
 			break
 		end

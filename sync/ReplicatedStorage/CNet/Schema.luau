@@ -75,8 +75,8 @@ function Schema.dict(kInterpreter, vInterpreter)
 	schema.write = function(b: buffer, offset: number, dict: { [any]: any })
 		local keys = #getKeysInDict(dict)
 		
-		if #keys > 255 then
-			warn(`Dict schema can only have 255 keys, you have {#keys} keys.`)
+		if keys > 255 then
+			warn(`Dict schema can only have 255 keys, you have {keys} keys.`)
 			return
 		end
 		
