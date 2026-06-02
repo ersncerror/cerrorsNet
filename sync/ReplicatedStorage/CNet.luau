@@ -2,6 +2,7 @@ local RunService = game:GetService("RunService")
 
 local DataTypes = require(script.DataTypes)
 local Schema = require(script.Schema)
+local Configuration = require(script.Configuration)
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
@@ -13,8 +14,11 @@ local copyb = buffer.copy
 
 local idCounter = 1
 
-local BYTES_PER_FRAMES = 2048 -- every frames can hold for x bytes.
-local MAX_PACKETS_QUEUE = 128
+local BYTES_PER_FRAMES = Configuration.BYTES_PER_FRAMES -- every frames can hold for x bytes.
+local MAX_PACKETS_QUEUE = Configuration.MAX_PACKETS_QUEUE
+local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
+
+local estimateBuffer = buffer.create(BYTES_PER_FRAMES)
 
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
 local globalPacketOffset = 0
@@ -23,7 +27,6 @@ local unreliablePackets = buffer.create(BYTES_PER_FRAMES)
 local unreliPacketOffset = 0
 
 local playerPackets: { [Player]: { b: buffer, offset: number, unreliB: buffer?, unreliOffset: number? } }
-local invokingPackets = {}
 
 local remote: RemoteEvent
 local unreliableRemote: UnreliableRemoteEvent
@@ -40,7 +43,7 @@ class.DataTypes = DataTypes
 class.Schema = Schema
 
 local function abstractPacket(source: buffer, targetOffset: number)
-	local abstractedPacket = buffer.create(globalPacketOffset + 1)
+	local abstractedPacket = buffer.create(targetOffset + 1)
 	copyb(abstractedPacket, 0, source, 0, targetOffset)
 
 	return abstractedPacket
@@ -73,7 +76,30 @@ local function serialize(b: buffer, offset: number, datas: { any }, dataTypes: {
 	return offset
 end
 
+local function estimatePacketSize(datas: { any }, dataTypes: { DataTypes.DataType })
+	local size = 0
+	
+	for i, dataInterperter in dataTypes do
+		size += dataInterperter.write(estimateBuffer, size, datas[i]) or dataInterperter.bytes
+	end
+	
+	return size
+end
+
 local function writeInPacket(packet: buffer, offset: number, net: Net, datas: { any }, _response: boolean?)
+	if offset + 3 >= BYTES_PER_FRAMES then
+		warn(
+			`[CNet]: Overflow detected, packet is at least required for 3 bytes, your packet may need more space to write. (space left:{BYTES_PER_FRAMES - offset}, fired by net "{net.Name}")`
+		)
+		return offset
+	end
+
+	local size = estimatePacketSize(datas, net._dataTypes)
+	if offset + 3 + size >= BYTES_PER_FRAMES then
+		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, space lefts:{BYTES_PER_FRAMES - offset}. fired by net "{net.Name}".`)
+		return offset
+	end
+	
 	writeu8(packet, offset, net._id)
 	local newOffset = serialize(packet, offset + 3, datas, _response and net._responseDataTypes or net._dataTypes)
 	writeu16(packet, offset + 1, newOffset - offset - 3)
@@ -110,6 +136,12 @@ local function setPlayersPacket(player: Player, unreliable: boolean?)
 
 	playerPackets[player] = packet
 	return packet
+end
+
+local function newConnection(func): Connection
+	return {
+		Disconnect = func
+	}
 end
 
 local function processPacketsToClient()
@@ -151,7 +183,7 @@ local function processPacketsToServer()
 	end
 end
 
-local function sendPacketToListeners(net: Net, packet: {any})
+local function sendPacketToListeners(net: Net, packet: { any })
 	if net._eventListenerCount > 0 then
 		local listener = net._eventListeners.next
 
@@ -172,65 +204,158 @@ local function sendPacketToListeners(net: Net, packet: {any})
 	end
 end
 
+local function invokeHandlerSetSuccessHandler(self: InvokeHandler, func: (...any) -> ())
+	assert(
+		typeof(func) == "function",
+		`[Invoke handler]: OnSuccess method, parameter 2 are expected to be function, but got {typeof(func)}.`
+	)
+	self._onInvoked = func
+
+	return self
+end
+
+local function invokeHandlerSetTimeoutHandler(self: InvokeHandler, func: (...any) -> ())
+	assert(
+		typeof(func) == "function",
+		`[Invoke handler]: OnTimeout method, parameter 2 are expected to be function, but got {typeof(func)}.`
+	)
+	self._onTimeout = func
+
+	return self
+end
+
+local function newInvokeHandler(timeout): InvokeHandler
+	local self = {} :: InvokeHandler
+	self._resolved = false
+
+	self.OnSuccess = invokeHandlerSetSuccessHandler
+	self.OnTimeout = invokeHandlerSetTimeoutHandler
+
+	self._thread = task.spawn(function()
+		local result = coroutine.yield()
+		local isTimeout = table.remove(result, 1)
+
+		if self._resolved then
+			return
+		end
+
+		if isTimeout and self._onTimeout then
+			task.spawn(self._onTimeout)
+		elseif self._onInvoked then
+			task.spawn(self._onInvoked, table.unpack(result))
+		end
+
+		self._resolved = true
+
+		self._thread = nil
+		
+		if coroutine.status(self._timeoutThread) ~= "normal" then
+			coroutine.close(self._timeoutThread)
+		end
+	end)
+
+	self._timeoutThread = task.delay(timeout, function()
+		if self._resolved then
+			return
+		end
+
+		task.spawn(self._thread, {true})
+		self._thread = nil
+	end)
+
+	return self
+end
+
+local function handleResponsePacket(net: Net, player: Player?, packet: { any })
+	-- if this net is not waiting for a response
+	-- then it should be the one who response the sender.
+
+	-- else, it will be the one where waiting for response.
+
+	if not net._waitingForResponse then
+		if player then
+			table.insert(packet, 1, player)
+		end
+
+		if not net._onInvoke then
+			queuePacketToNet(net, packet)
+			return
+		end
+
+		if player then
+			setPlayersPacket(player, false)
+		end
+
+		local targetBuffer = player and playerPackets[player].b or globalPackets
+		local bOffset = player and playerPackets[player].offset or globalPacketOffset
+		local datas = { net._onInvoke(unpack(packet)) }
+
+		local offset = writeInPacket(targetBuffer, bOffset, net, datas, true)
+
+		if player then
+			playerPackets[player].offset = offset
+		else
+			globalPacketOffset = offset
+		end
+	elseif net._waitingForResponse then
+		table.insert(packet, 1, false)
+		
+		if player then
+			table.insert(packet, 2, player)
+		end
+
+		if not net._waitingForResponse._thread then
+			net._waitingForResponse = nil
+			return
+		end
+
+		task.spawn( net._waitingForResponse._thread, packet )
+		net._waitingForResponse = nil
+	end
+end
+
 local function onPacketReceived(packets: buffer, player: Player?)
 	debug.profilebegin("CNet_ProcessPackets")
-
+	
+	if buffer.len(packets) > BYTES_PER_FRAMES then
+		warn(`[CNet]: Sender ({player or "Server"}) provided a packet with exceeded size limit ({BYTES_PER_FRAMES}) of {buffer.len(packets)}`)
+		return
+	end
+	
 	local offset = 0
-
+	
 	local packetId = readu8(packets, offset)
 	while packetId ~= 0 and offset < buffer.len(packets) do
 		local net = netsById[packetId]
 		local length = readu16(packets, offset + 1)
-		offset += 3 -- theres a byte of packet length behind the id
-
+		offset += 3 -- theres 2 bytes of packet length behind the id
+		
+		-- CHECK BOUNDS BEFORE READING
+		if offset + length > buffer.len(packets) then
+			warn(`[CNet]: Malformed packet, it's length ({length}) exceeds buffer bounds.`)
+			break
+		end
+		
 		if not net then
 			cachedPackets[packetId] = cachedPackets[packetId] or {}
 			local cuttedBuffer = buffer.create(length + 1)
 			copyb(cuttedBuffer, 0, packets, offset, length)
-			table.insert(cachedPackets[packetId], {b = cuttedBuffer, player = player})
+			table.insert(cachedPackets[packetId], { b = cuttedBuffer, player = player })
 
 			offset += length
 			packetId = readu8(packets, offset)
 			continue
 		end
 
-		local unSerializedPacket = unSerialize({ player }, offset, packets, net._dataTypes)
+		local unSerializedPacket = unSerialize({}, offset, packets, net._dataTypes)
 		offset += length
 
 		if net._response then
-			if not invokingPackets[net._id] then
-				if not net.OnInvoke then
-					queuePacketToNet(net, unSerializedPacket)
-					continue
-				end
-
-				if player then
-					playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
-				end
-
-				local targetBuffer = player and playerPackets[player].b or globalPackets
-				local bOffset = player and playerPackets[player].offset or globalPacketOffset
-				local oldOffset = bOffset
-
-				buffer.writeu8(targetBuffer, bOffset, net._id)
-				bOffset = serialize(
-					targetBuffer,
-					bOffset + 1,
-					{ net._onInvoke(unpack(unSerializedPacket)) },
-					net._responseDataTypes
-				)
-
-				if player then
-					playerPackets[player].offset = bOffset
-				else
-					globalPacketOffset = bOffset
-					offset += bOffset - oldOffset
-				end
-			else
-				invokingPackets[net._id] = nil
-				task.spawn(net._waitingForResponse, unpack(unSerializedPacket))
-			end
+			handleResponsePacket(net, player, unSerializedPacket)
 		else
+			if player then
+				table.insert(unSerializedPacket, 1, player)
+			end
 			sendPacketToListeners(net, unSerializedPacket)
 		end
 
@@ -259,6 +384,14 @@ function class.new(netName, ...): Net
 	self._id = script:GetAttribute(netName) or idCounter
 	idCounter += script:GetAttribute(netName) and 0 or 1
 
+	if netsById[self._id] then
+		local newId = script:GetAttribute(netsById[self._id].Name) or idCounter
+		netsById[newId] = netsById[self._id]
+		netsById[newId]._id = newId
+		
+		idCounter += script:GetAttribute(netName) and 0 or 1
+	end
+
 	nets[netName] = self
 	netsById[self._id] = self
 
@@ -268,9 +401,9 @@ function class.new(netName, ...): Net
 	self._eventListeners.previous = self._eventListeners
 
 	-- check cached packets
-	if cachedPackets[self._id] then	
+	if cachedPackets[self._id] then
 		for _, packet in cachedPackets[self._id] do
-			local unSerializedData = unSerialize({cachedPackets[self._id].player}, 0, packet.b, self._dataTypes)
+			local unSerializedData = unSerialize({ packet.player }, 0, packet.b, self._dataTypes)
 			sendPacketToListeners(self, unSerializedData)
 		end
 
@@ -285,13 +418,18 @@ function class:InvokeServer(...)
 
 	globalPacketOffset = writeInPacket(globalPackets, globalPacketOffset, self, datas)
 
-	self._waitingForResponse = coroutine.running()
-	invokingPackets[self._id] = self
-	return coroutine.yield()
+	self._waitingForResponse = newInvokeHandler(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:InvokeClient(player, ...)
-	playerPackets[player] = playerPackets[player] or { b = buffer.create(BYTES_PER_FRAMES), offset = 0 }
+	if not player or typeof(player) ~= "Instance" or not player:IsA("Player") then
+		error(
+			`On invoking client, but player parameter is not a player, got {typeof(player) == "Instance" and player.ClassName or player}.`
+		)
+	end
+
+	setPlayersPacket(player)
 	local b = playerPackets[player].b
 	local offset = playerPackets[player].offset
 
@@ -299,15 +437,15 @@ function class:InvokeClient(player, ...)
 
 	playerPackets[player].offset = writeInPacket(b, offset, self, datas)
 
-	self._waitingForResponse = coroutine.running()
-	invokingPackets[self._id] = self
-	return coroutine.yield()
+	self._waitingForResponse = newInvokeHandler(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:OnInvoke(func: () -> ())
 	self._onInvoke = func
 
 	if #self._queuedPackets > 0 then
+
 		for _, packet in self._queuedPackets do
 			if RunService:IsClient() then
 				local data = { self._onInvoke(unpack(packet)) }
@@ -333,11 +471,22 @@ function class:Response(...)
 	assert(not self._unreliable, `This net ({self.Name}) is a unreliable net, you can't set it to a response net.`)
 
 	self._response = true
+	self._timeout = DEFAULT_TIMEOUT
 
 	self._eventListeners = nil
 	self._eventListenerCount = nil
 
 	self._responseDataTypes = { ... }
+
+	return self
+end
+
+-- Set response net with a timeout, by default, it will be a 5 seconds.
+function class:WithTimeout(timeout)
+	assert(self._response, `This net ({self.Name}) is not a response net, you can't set it with a timeout.`)
+	assert(typeof(timeout) == "number", `Expected to have number for timeout, but got {typeof(timeout)}.`)
+
+	self._timeout = timeout
 
 	return self
 end
@@ -352,6 +501,12 @@ function class:Unreliable()
 end
 
 function class:Fire(player, ...)
+	if not player or typeof(player) ~= "Instance" or not player:IsA("Player") then
+		error(
+			`On firing client, but player parameter is not a player, got {typeof(player) == "Instance" and player.ClassName or player}.`
+		)
+	end
+
 	local isNetUnreliable = self._unreliable
 
 	local thisPlayersPacket = setPlayersPacket(player, isNetUnreliable)
@@ -398,13 +553,11 @@ function class:Connect(func)
 		table.clear(self._queuedPackets)
 	end
 
-	return {
-
-		Disconnect = function()
-			link.previous.next = link.next
-			link.next.previous = link.previous
-		end,
-	}
+	return newConnection(function()
+		link.previous.next = link.next
+		link.next.previous = link.previous
+		table.clear(link)
+		end)
 end
 
 function class:Once(func)
@@ -430,7 +583,15 @@ function class:Once(func)
 		self._eventListeners.next.previous = link
 		self._eventListeners.next = link
 		self._eventListenerCount += 1
+
+		return newConnection(function()
+			link.previous.next = link.next
+			link.next.previous = link.previous
+			table.clear(link)
+		end)
 	end
+
+	return true
 end
 
 function class:Wait()
@@ -445,6 +606,13 @@ function class:Wait()
 	self._eventListenerCount += 1
 
 	return coroutine.yield()
+end
+
+if BYTES_PER_FRAMES > 10000 and Configuration.WARN_BYTES_PER_FRAMES_TOO_BIG and RunService:IsServer() then
+	warn([[[CNet]: You have set BYTES_PER_FRAME over than 10000 bytes! 
+	Please make sure you really need a huge packet for this, higher than 10kb will possibly cause data loss.
+	(You can turn this warn off by set WARN_BYTES_PER_FRAMES_TOO_BIG to false in config.)
+	]])
 end
 
 if RunService:IsServer() then
@@ -473,10 +641,22 @@ else
 	RunService.Heartbeat:Connect(processPacketsToServer)
 end
 
+export type InvokeHandler = {
+	_thread: thread,
+	_timeoutThread: thread,
+	_onInvoked: (...any) -> (),
+	_onTimeout: (...any) -> (),
+
+	OnSuccess: (self: InvokeHandler, (...any) -> ()) -> ( InvokeHandler ),
+	OnTimeout: (self: InvokeHandler, (...any) -> ()) -> ( InvokeHandler ),
+}
+
 export type Net = {
 	DataTypes: DataTypes.List,
 	Schema: Schema.Schema,
-
+	
+	Name: string,
+	
 	_id: number,
 	_dataTypes: { DataTypes.DataType },
 	_responseDataTypes: { DataTypes.DataType },
@@ -491,26 +671,32 @@ export type Net = {
 	_response: boolean?,
 	_unreliable: boolean?,
 
-	_waitingForResponse: thread?,
+	_waitingForResponse: InvokeHandler?,
 	_onInvoke: (...any) -> ...any?,
+	_timeout: number?,
 
 	-- constructors
 	new: (netName: string, ...DataTypes.DataType) -> Net,
 	Response: (self: Net, ...DataTypes.DataType) -> Net,
+	WithTimeout: (self: Net, timeout: number) -> Net,
 	Unreliable: (self: Net) -> Net,
 
 	-- speaker methods
 	Fire: (self: Net, player: Player, ...any) -> (),
 	FireAll: (self: Net, ...any) -> (),
 
-	InvokeClient: (self: Net, player: Player, ...any) -> ...any,
-	InvokeServer: (self: Net, ...any) -> ...any,
+	InvokeClient: (self: Net, player: Player, ...any) -> InvokeHandler,
+	InvokeServer: (self: Net, ...any) -> InvokeHandler,
 	OnInvoke: (self: Net, func: () -> ()) -> (),
 
 	-- listen methods
-	Connect: (self: Net, func: (...any) -> ()) -> { Disconnect: () -> () },
-	Once: (self: Net, func: (...any) -> ()) -> (),
-	Wait: (self: Net) -> any,
+	Connect: (self: Net, func: (...any) -> ()) -> Connection,
+	Once: (self: Net, func: (...any) -> ()) -> Connection | true,
+	Wait: (self: Net) -> ...any,
+}
+
+export type Connection = {
+	Disconnect: ( self: Connection ) -> (),
 }
 
 return class

@@ -1,9 +1,11 @@
 local net = require(game.ReplicatedStorage.CNet)
 
-task.wait(20)
+local newNet = net.new("hello", net.DataTypes.u8):Response(net.DataTypes.u8)
 
-local newNet = net.new("hello", net.DataTypes.u8)
-
-newNet:Connect(function(t)
-	print(t)
-end)
+while task.wait(1) do
+	newNet:InvokeServer(1):OnSuccess(function(...)
+		print("Success:", ...)
+	end):OnTimeout(function()
+		warn("Timeout")
+	end)
+end
