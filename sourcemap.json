@@ -53,6 +53,14 @@
           ],
           "children": [
             {
+              "name": "Configuration",
+              "className": "ModuleScript",
+              "guid": "16521040",
+              "filePaths": [
+                "sync/ReplicatedStorage/CNet/Configuration.luau"
+              ]
+            },
+            {
               "name": "DataTypes",
               "className": "ModuleScript",
               "guid": "139135",

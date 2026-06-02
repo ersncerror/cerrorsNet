@@ -2,6 +2,7 @@ local RunService = game:GetService("RunService")
 
 local DataTypes = require(script.DataTypes)
 local Schema = require(script.Schema)
+local Configuration = require(script.Configuration)
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
@@ -13,9 +14,9 @@ local copyb = buffer.copy
 
 local idCounter = 1
 
-local BYTES_PER_FRAMES = 2048 -- every frames can hold for x bytes.
-local MAX_PACKETS_QUEUE = 128
-local DEFAULT_TIMEOUT = 5
+local BYTES_PER_FRAMES = Configuration.BYTES_PER_FRAMES -- every frames can hold for x bytes.
+local MAX_PACKETS_QUEUE = Configuration.MAX_PACKETS_QUEUE
+local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
 
 local globalPackets = buffer.create(BYTES_PER_FRAMES)
 local globalPacketOffset = 0
@@ -73,7 +74,24 @@ local function serialize(b: buffer, offset: number, datas: { any }, dataTypes: {
 	return offset
 end
 
+local function estimatePacketSize(datas: { any }, dataTypes: { DataTypes.DataType })
+	local size = 0
+	local b = buffer.create(100)
+	
+	for i, dataInterperter in dataTypes do
+		size += dataInterperter.write(b, size, datas[i]) or dataInterperter.bytes
+	end
+	
+	return size
+end
+
 local function writeInPacket(packet: buffer, offset: number, net: Net, datas: { any }, _response: boolean?)
+	local size = estimatePacketSize(datas, net._dataTypes)
+	if offset + 3 + size >= BYTES_PER_FRAMES then
+		warn(`[CNet]: Overflow detected, {size + 3} bytes is required, current left space: {BYTES_PER_FRAMES - offset}. Recommended to write packets with multpiles frames.`)
+		return
+	end
+	
 	writeu8(packet, offset, net._id)
 	local newOffset = serialize(packet, offset + 3, datas, _response and net._responseDataTypes or net._dataTypes)
 	writeu16(packet, offset + 1, newOffset - offset - 3)
@@ -200,6 +218,7 @@ end
 
 local function newInvokeHandler(timeout): InvokeHandler
 	local self = {} :: InvokeHandler
+	self._resolved = false
 
 	self.OnSuccess = invokeHandlerSetSuccessHandler
 	self.OnTimeout = invokeHandlerSetTimeoutHandler
@@ -208,11 +227,17 @@ local function newInvokeHandler(timeout): InvokeHandler
 		local result = coroutine.yield()
 		local isTimeout = table.remove(result, 1)
 
+		if self._resolved then
+			return
+		end
+
 		if isTimeout and self._onTimeout then
 			task.spawn(self._onTimeout)
 		elseif self._onInvoked then
 			task.spawn(self._onInvoked, table.unpack(result))
 		end
+
+		self._resolved = true
 
 		self._thread = nil
 		
@@ -222,6 +247,10 @@ local function newInvokeHandler(timeout): InvokeHandler
 	end)
 
 	self._timeoutThread = task.delay(timeout, function()
+		if self._resolved then
+			return
+		end
+
 		task.spawn(self._thread, {true})
 		self._thread = nil
 	end)
@@ -279,15 +308,26 @@ end
 
 local function onPacketReceived(packets: buffer, player: Player?)
 	debug.profilebegin("CNet_ProcessPackets")
-
+	
+	if buffer.len(packets) > BYTES_PER_FRAMES then
+		warn(`[CNet]: Sender ({player or "Server"}) provided a packet with exceeded size limit ({BYTES_PER_FRAMES}) of {buffer.len(packets)}`)
+		return
+	end
+	
 	local offset = 0
-
+	
 	local packetId = readu8(packets, offset)
 	while packetId ~= 0 and offset < buffer.len(packets) do
 		local net = netsById[packetId]
 		local length = readu16(packets, offset + 1)
 		offset += 3 -- theres 2 bytes of packet length behind the id
-
+		
+		-- CHECK BOUNDS BEFORE READING
+		if offset + 3 + length > buffer.len(packets) then
+			warn(`[CNet]: Malformed packet, it's length ({length}) exceeds buffer bounds.`)
+			break
+		end
+		
 		if not net then
 			cachedPackets[packetId] = cachedPackets[packetId] or {}
 			local cuttedBuffer = buffer.create(length + 1)
@@ -347,7 +387,7 @@ function class.new(netName, ...): Net
 	-- check cached packets
 	if cachedPackets[self._id] then
 		for _, packet in cachedPackets[self._id] do
-			local unSerializedData = unSerialize({ cachedPackets[self._id].player }, 0, packet.b, self._dataTypes)
+			local unSerializedData = unSerialize({ packet.player }, 0, packet.b, self._dataTypes)
 			sendPacketToListeners(self, unSerializedData)
 		end
 
@@ -389,7 +429,7 @@ function class:OnInvoke(func: () -> ())
 	self._onInvoke = func
 
 	if #self._queuedPackets > 0 then
-		print("process cached response packets.")
+
 		for _, packet in self._queuedPackets do
 			if RunService:IsClient() then
 				local data = { self._onInvoke(unpack(packet)) }
@@ -535,7 +575,7 @@ function class:Once(func)
 		end)
 	end
 
-	return
+	return true
 end
 
 function class:Wait()
@@ -626,7 +666,7 @@ export type Net = {
 
 	-- listen methods
 	Connect: (self: Net, func: (...any) -> ()) -> Connection,
-	Once: (self: Net, func: (...any) -> ()) -> Connection?,
+	Once: (self: Net, func: (...any) -> ()) -> Connection | true,
 	Wait: (self: Net) -> ...any,
 }
 
