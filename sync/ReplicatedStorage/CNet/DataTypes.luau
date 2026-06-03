@@ -1,18 +1,14 @@
-local dataTypes = {} :: List
+local types = require(script.Parent._types)
+type DataType = types.DataType
+
+local list = {} :: List
 
 for _, dataType in script:GetChildren() do
-	dataTypes[dataType.Name] = require(dataType)
+	list[dataType.Name] = require(dataType)
 end
 
-export type DataType = {
-	bytes: number,
-	write: ( b: buffer, offset: number, value: any ) -> (number),
-	read: ( b: buffer, offset: number ) -> (any, number?)
-	
+export type List = {
+	uint8: DataType,
 }
 
-export type List = {
-	u8: DataType
-} 
-
-return dataTypes 
+return list
