@@ -20,6 +20,7 @@ jobs:
         uses: YoloWingPixie/selene-lua-linter-action@v1
         with: 
           config-path: "selene.toml"
+          lint-path: "sync"
 
   style:
     runs-on: ubuntu-latest
@@ -31,4 +32,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: latest
-          args: --check src
+          args: --check sync

@@ -15,6 +15,8 @@ local function get(value: number, pos: number)
 end
 
 function class.new(struct)
+    -- why do i have this bro :sob:
+
     local keys = {} :: { string }
 
     for key, _ in struct do
