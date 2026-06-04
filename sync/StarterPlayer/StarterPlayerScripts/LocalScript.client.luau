@@ -1,7 +1,9 @@
 local CNet = require(game:GetService("ReplicatedStorage").CNet)
 
-local myNet = CNet.new("MyNet", CNet.uint8)
+local myNet = CNet.new("MyNet", CNet.uint8):Response(CNet.uint8):WithTimeoutOf(10)
 
-while task.wait(0.1) do
-	myNet:FireAll(1)
-end
+myNet:InvokeServer(1):InvokeSuccess(function(...)
+	print(...)
+end):Timeout(function()
+	print("timeout!")
+end)

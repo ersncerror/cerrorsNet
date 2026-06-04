@@ -79,6 +79,14 @@
               ]
             },
             {
+              "name": "Invoker",
+              "className": "ModuleScript",
+              "guid": "11588232",
+              "filePaths": [
+                "sync/ReplicatedStorage/CNet/Invoker.luau"
+              ]
+            },
+            {
               "name": "Packet",
               "className": "ModuleScript",
               "guid": "139228",

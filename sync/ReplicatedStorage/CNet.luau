@@ -2,11 +2,13 @@ local RunService = game:GetService("RunService")
 
 -- modules
 local DataTypes = require(script.DataTypes)
+local Invoker = require(script.Invoker)
 local Packet = require(script.Packet)
 local types = require(script._types)
 
 -- types
 type Packet = types.Packet
+type Invoker = Invoker.Invoker
 type DataType = types.DataType
 type playerPacket = { stable: Packet, unstable: Packet? }
 
@@ -24,6 +26,7 @@ local remoteEvent: RemoteEvent
 local unreliRemoteEvent: UnreliableRemoteEvent
 
 -- variables
+local DEFAULT_TIMEOUT = 5 -- when net is changed to response, before :WithTimeoutOf call.
 local BYTES_PER_FRAME = 2048
 local MAX_QUEUED_PACKETS = 128 -- this is for nets if they don't have listeners.
 local MAX_CACHE_PACKETS = 64 -- this is for nets if they aren't registered.
@@ -173,10 +176,9 @@ local function handleResponsePacket(self: Net, datas: {any}, player: Player?)
 
 	if self._waitingForResponse then
 		-- this is the invoke caller
-		local t = self._waitingForResponse
-
+		local invoker = self._waitingForResponse
 		self._waitingForResponse = nil
-		task.spawn(t, unpack(datas))
+		invoker:_callSolver(Invoker.success, unpack(datas))
 	else		
 		-- response the invoke caller
 		
@@ -410,15 +412,24 @@ function class:Wait()
 end
 
 -- response methods
-
 function class:Response(...)
 	assert(not self._unstable, `[CNet]: Unstable net "{self.Name}" cannot be change to response net.`)
 
 	self._response = true
 	self._eventListeners = nil
+	self._timeout = DEFAULT_TIMEOUT
 
 	self._responseDataTypes = { ... }
 
+	return self
+end
+
+function class:WithTimeoutOf(timeout)
+	assert(self._response, `[CNet]: Could not set timeout for a non-response Net. (Name:"{self.Name}")`)
+	assert(typeof(timeout) == "number", `[CNet]: Cannot set timeout with a value of type "{typeof(timeout)}".`)
+	
+	self._timeout = timeout
+	
 	return self
 end
 
@@ -428,8 +439,8 @@ function class:InvokeServer(...)
 	writePacketInfo(self, globalPackets, datas, self._dataTypes)
 	globalPackets:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = coroutine.running()
-	return coroutine.yield()
+	self._waitingForResponse = Invoker.new(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:InvokeClient(player, ...)
@@ -439,8 +450,8 @@ function class:InvokeClient(player, ...)
 	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes)
 	plrPacket.stable:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = coroutine.running()
-	return coroutine.yield()
+	self._waitingForResponse = Invoker.new(self._timeout)
+	return self._waitingForResponse
 end
 
 function class:OnInvoke(func)
@@ -511,7 +522,8 @@ export type Net = {
 
 	-- response net properties
 	_response: boolean?,
-	_waitingForResponse: thread?,
+	_timeout: number?,
+	_waitingForResponse: Invoker?,
 	_responseDataTypes: { DataType }?,
 	_onInvoke: (...any) -> (...any),
 
@@ -523,14 +535,15 @@ export type Net = {
 	Fire: (self: Net, player: Player, ...any) -> (),
 	FireAll: (self: Net, ...any) -> (),
 
-	InvokeServer: ( self: Net, ...any ) -> ( ...any ),
-	InvokeClient: ( self: Net, player: Player, ...any ) -> (...any),
+	InvokeServer: ( self: Net, ...any ) -> ( Invoker ),
+	InvokeClient: ( self: Net, player: Player, ...any ) -> ( Invoker ),
 
 	-- listeners
 	Connect: ( self: Net, func: (...any) -> () ) -> (Connection),
 	Once: ( self: Net, func: (...any) -> () ) -> (Connection),
 	Wait: ( self: Net ) -> (...any),
-
+	
+	WithTimeoutOf: ( self: Net, timeout: number ) -> ( Net ),
 	OnInvoke: ( self: Net, func: (...any) -> (...any) ) -> (),
 
 } & DataTypes.List
