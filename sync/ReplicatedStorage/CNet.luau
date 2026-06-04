@@ -35,7 +35,7 @@ local estimatePacket = Packet.new(BYTES_PER_FRAME)
 local globalPackets = Packet.new(BYTES_PER_FRAME)
 local unstablePacket = Packet.new(BYTES_PER_FRAME)
 
-local playerPackets = {}
+local playerPackets = {} :: { [Player]: playerPacket }
 
 -- > tables
 local nets = {} :: { [string]: Net }
@@ -46,6 +46,49 @@ local packetDropCounters = {} :: { [number]: number }
 
 local class = {} :: Net
 class.__index = class
+
+-- Net work related --
+local function disconnect(self: Connection)
+	self._previous._next = self._next
+	self._next._previous = self._previous
+	table.clear(self)
+end
+
+local function queuePacket(self: Net, packet: {any})
+	if #self._queuedPackets > MAX_QUEUED_PACKETS then
+
+		if #self._queuedPackets % 4294967296 == 0 then
+			warn(
+				`[CNet]: Net "{self.Name}"'s queued packets overflowed, did you just forget to connect? ({#self._queuedPackets} packets dropped.)`
+			)
+		end
+
+		return
+	end
+
+	table.insert(self._queuedPackets, packet)
+end
+
+local function sendToListeners(self: Net, packet: {any})
+	if self._eventListeners._next == self._eventListeners then
+		queuePacket(self, packet)
+		return
+	end
+
+	local connection = self._eventListeners._next :: Connection
+
+	while connection ~= self._eventListeners do
+
+		if connection.func then
+			task.spawn(connection.func, unpack(packet))
+		elseif connection.thread then
+			task.spawn(connection.thread, unpack(packet))
+			connection:Disconnect()
+		end
+
+		connection = connection._next
+	end
+end
 
 -- write packet related --
 local function abstractPacket(packet: Packet): (buffer, { Instance })
@@ -124,47 +167,39 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	return result, offset
 end
 
--- Net work related --
-local function disconnect(self: Connection)
-	self._previous._next = self._next
-	self._next._previous = self._previous
-	table.clear(self)
-end
+local function handleResponsePacket(self: Net, datas: {any}, player: Player?)
 
-local function queuePacket(self: Net, packet: {any})
-	if #self._queuedPackets > MAX_QUEUED_PACKETS then
+	if self._waitingForResponse then
+		-- this is the invoke caller
+		local t = self._waitingForResponse
 
-		if #self._queuedPackets % 4294967296 == 0 then
-			warn(
-				`[CNet]: Net "{self.Name}"'s queued packets overflowed, did you just forget to connect? ({#self._queuedPackets} packets dropped.)`
-			)
-		end
-
-		return
-	end
-
-	table.insert(self._queuedPackets, packet)
-end
-
-local function sendToListeners(self: Net, packet: {any})
-	if self._eventListeners._next == self._eventListeners then
-		queuePacket(self, packet)
-		return
-	end
-
-	local connection = self._eventListeners._next :: Connection
-
-	while connection ~= self._eventListeners do
+		self._waitingForResponse = nil
+		task.spawn(t, unpack(datas))
+	else		
+		-- response the invoke caller
 		
-		if connection.func then
-			task.spawn(connection.func, unpack(packet))
-		elseif connection.thread then
-			task.spawn(connection.thread, unpack(packet))
-			connection:Disconnect()
+		if player then
+			setPlayerPacket(player)
+			table.insert( datas, 1, player )
 		end
 		
-		connection = connection._next
+		if not self._onInvoke then
+			queuePacket(self, datas)
+			return
+		end
+		
+		local responseDatas = { self._onInvoke( unpack(datas) ) }
+		
+		writePacketInfo(self, player and playerPackets[player].stable or globalPackets, responseDatas, self._responseDataTypes)
+		
+		if player then
+			playerPackets[player].stable:Write(responseDatas, self._responseDataTypes)
+		else
+			globalPackets:Write(responseDatas, self._responseDataTypes)
+		end
+		
 	end
+
 end
 
 -- main work related --
@@ -220,7 +255,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 			break
 		end
 
-		local net = netById[netId]
+		local net = netById[netId] :: Net
 
 		if not net then
 			local packetToCache = buffer.create(length)
@@ -236,11 +271,15 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local datas, newOffset = unserialize(packet, offset, net._dataTypes)
 		offset = newOffset
 
-		if player then 
-			table.insert(datas, 1, player)
-		end
+		if net._response then
+			handleResponsePacket(net, datas, player)
+		else
+			if player then
+				table.insert(datas, 1, player)
+			end
 
-		sendToListeners(net, datas)
+			sendToListeners(net, datas)
+		end
 		
 		-- continue to next packet
 		netId = readu8(b, offset)
@@ -288,6 +327,8 @@ function class.new(name, ...)
 	return self
 end
 
+-- un/stable methods
+
 function class:Fire(player, ...)
 	assert(typeof(player) == "Instance", `Parameter 1 is a non-Instance value, got value of type "{typeof(player)}".`)
 	assert(player:IsA("Player"), `Parameter 1 is a non-Player instance, got instance of class "{player.ClassName}".`)
@@ -325,6 +366,46 @@ function class:Connect(func)
 	end
 
 	return connection
+end
+
+-- response methods
+
+function class:Response(...)
+	assert(not self._unstable, `[CNet]: Unstable net "{self.Name}" cannot be change to response net.`)
+
+	self._response = true
+	self._eventListeners = nil
+
+	self._responseDataTypes = { ... }
+
+	return self
+end
+
+function class:InvokeServer(...)
+	local datas = { ... }
+
+	writePacketInfo(self, globalPackets, datas, self._dataTypes)
+	globalPackets:Write(datas, self._dataTypes)
+
+	self._waitingForResponse = coroutine.running()
+	return coroutine.yield()
+end
+
+function class:InvokeClient(player, ...)
+	local datas = { ... }
+
+	local plrPacket = setPlayerPacket(player)
+	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes)
+	plrPacket.stable:Write(datas, self._dataTypes)
+
+	self._waitingForResponse = coroutine.running()
+	return coroutine.yield()
+end
+
+function class:OnInvoke(func)
+	assert(typeof(func) == "function", `Could not use {typeof(func)} as a invoke handler.`)
+
+	self._onInvoke = func
 end
 
 -- Initialize --
@@ -378,14 +459,29 @@ export type Net = {
 	_eventListeners: Connection,
 	_queuedPackets: { {any} },
 
+	-- unstable net properties
+	_unstable: boolean?,
+
+	-- response net properties
+	_response: boolean?,
+	_waitingForResponse: thread?,
+	_responseDataTypes: { DataType }?,
+	_onInvoke: (...any) -> (...any),
+
 	new: (name: string, ...DataType) -> (Net),
+	Response: ( self: Net, ...DataType ) -> (Net),
 
 	-- speakers
 	Fire: (self: Net, player: Player, ...any) -> (),
 	FireAll: (self: Net, ...any) -> (),
 
+	InvokeServer: ( self: Net, ...any ) -> ( ...any ),
+	InvokeClient: ( self: Net, player: Player, ...any ) -> (...any),
+
 	-- listeners
 	Connect: ( self: Net, func: (...any) -> () ) -> Connection,
+
+	OnInvoke: ( self: Net, func: (...any) -> (...any) ) -> (),
 
 } & DataTypes.List
 
