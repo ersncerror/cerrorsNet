@@ -10,6 +10,6 @@ return {
 		write(packet.b, packet.offset, math.floor(value))
 	end,
 	read = function(packet: Packet, offset: number)
-		return read(packet.b, offset) 
+		return read(packet.b, offset)
 	end,
 }

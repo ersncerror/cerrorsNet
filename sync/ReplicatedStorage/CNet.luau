@@ -57,12 +57,11 @@ class.__index = class
 local function disconnect(self: Connection)
 	self._previous._next = self._next
 	self._next._previous = self._previous
-	task.defer( table.clear, self )
+	task.defer(table.clear, self)
 end
 
-local function queuePacket(self: Net, packet: {any})
+local function queuePacket(self: Net, packet: { any })
 	if #self._queuedPackets > MAX_QUEUED_PACKETS then
-
 		if #self._queuedPackets % 4294967296 == 0 then
 			warn(
 				`[CNet]: Net "{self.Name}"'s queued packets overflowed, did you just forget to connect? ({#self._queuedPackets} packets dropped.)`
@@ -75,7 +74,7 @@ local function queuePacket(self: Net, packet: {any})
 	table.insert(self._queuedPackets, packet)
 end
 
-local function sendToListeners(self: Net, packet: {any})
+local function sendToListeners(self: Net, packet: { any })
 	if self._eventListeners._next == self._eventListeners then
 		queuePacket(self, packet)
 		return
@@ -84,7 +83,6 @@ local function sendToListeners(self: Net, packet: {any})
 	local connection = self._eventListeners._next :: Connection
 
 	while connection ~= self._eventListeners do
-		
 		if connection.func then
 			task.spawn(connection.func, unpack(packet))
 		elseif connection.thread then
@@ -147,7 +145,7 @@ local function cachePacketToUnreadyNet(netId: number, packetToCache: buffer)
 	if #cachedPackets[netId] > MAX_CACHE_PACKETS then
 		packetDropCounters[netId] = packetDropCounters[netId] or 0
 		packetDropCounters[netId] += 1
-		
+
 		if packetDropCounters[netId] % 4294967296 == 0 then
 			warn(
 				`[CNet]: Cached packets overflowed, did you just forget to create a net with id of "{netId}"? ({packetDropCounters[netId]} packets dropped.)`
@@ -173,38 +171,40 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	return result, offset
 end
 
-local function handleResponsePacket(self: Net, datas: {any}, player: Player?)
-
+local function handleResponsePacket(self: Net, datas: { any }, player: Player?)
 	if self._waitingForResponse then
 		-- this is the invoke caller
 		local invoker = self._waitingForResponse
 		self._waitingForResponse = nil
 		invoker:_callSolver(Invoker.success, unpack(datas))
-	else		
+	else
 		-- response the invoke caller
-		
+
 		if player then
 			setPlayerPacket(player)
-			table.insert( datas, 1, player )
+			table.insert(datas, 1, player)
 		end
-		
+
 		if not self._onInvoke then
 			queuePacket(self, datas)
 			return
 		end
-		
-		local responseDatas = { self._onInvoke( unpack(datas) ) }
-		
-		writePacketInfo(self, player and playerPackets[player].stable or globalPackets, responseDatas, self._responseDataTypes)
-		
+
+		local responseDatas = { self._onInvoke(unpack(datas)) }
+
+		writePacketInfo(
+			self,
+			player and playerPackets[player].stable or globalPackets,
+			responseDatas,
+			self._responseDataTypes
+		)
+
 		if player then
 			playerPackets[player].stable:Write(responseDatas, self._responseDataTypes)
 		else
 			globalPackets:Write(responseDatas, self._responseDataTypes)
 		end
-		
 	end
-
 end
 
 -- main work related --
@@ -240,7 +240,7 @@ local function processPacketsToClient()
 			unreliRemoteEvent:FireClient(player, abstractPacket(packets.unstable))
 		end
 	end
-	
+
 	table.clear(playerPackets)
 end
 
@@ -285,7 +285,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 
 			sendToListeners(net, datas)
 		end
-		
+
 		-- continue to next packet
 		netId = readu8(b, offset)
 	end
@@ -343,7 +343,10 @@ end
 
 function class:Fire(player, ...)
 	assert(not isClient, `Fire is not supported on client, you should use :FireAll instead.`)
-	assert(typeof(player) == "Instance", `Target to fire is a non-Instance value, got value of type "{typeof(player)}".`)
+	assert(
+		typeof(player) == "Instance",
+		`Target to fire is a non-Instance value, got value of type "{typeof(player)}".`
+	)
 	assert(player:IsA("Player"), `Target to fire is a non-Player instance, got instance of class "{player.ClassName}".`)
 
 	local datas = { ... }
@@ -357,7 +360,7 @@ end
 
 function class:FireAll(...)
 	local datas = { ... }
-	
+
 	local packetToWrite = self._unstable and unstablePacket or globalPackets
 
 	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
@@ -428,9 +431,9 @@ end
 function class:WithTimeoutOf(timeout)
 	assert(self._response, `[CNet]: Could not set timeout for a non-response Net. (Name:"{self.Name}")`)
 	assert(typeof(timeout) == "number", `[CNet]: Cannot set timeout with a value of type "{typeof(timeout)}".`)
-	
+
 	self._timeout = timeout
-	
+
 	return self
 end
 
@@ -506,7 +509,7 @@ export type Connection = {
 	func: () -> ()?,
 	thread: thread?,
 
-	Disconnect: ( self: Connection ) -> (),
+	Disconnect: (self: Connection) -> (),
 }
 
 export type Net = {
@@ -520,7 +523,7 @@ export type Net = {
 
 	-- stable net properties
 	_eventListeners: Connection,
-	_queuedPackets: { {any} },
+	_queuedPackets: { { any } },
 
 	-- unstable net properties
 	_unstable: boolean?,
@@ -530,27 +533,26 @@ export type Net = {
 	_timeout: number?,
 	_waitingForResponse: Invoker?,
 	_responseDataTypes: { DataType }?,
-	_onInvoke: (...any) -> (...any),
+	_onInvoke: (...any) -> ...any,
 
-	new: (name: string, ...DataType) -> (Net),
-	Response: ( self: Net, ...DataType ) -> (Net),
-	Unstable: ( self: Net ) -> (Net),
+	new: (name: string, ...DataType) -> Net,
+	Response: (self: Net, ...DataType) -> Net,
+	Unstable: (self: Net) -> Net,
 
 	-- speakers
 	Fire: (self: Net, player: Player, ...any) -> (),
 	FireAll: (self: Net, ...any) -> (),
 
-	InvokeServer: ( self: Net, ...any ) -> ( Invoker ),
-	InvokeClient: ( self: Net, player: Player, ...any ) -> ( Invoker ),
+	InvokeServer: (self: Net, ...any) -> Invoker,
+	InvokeClient: (self: Net, player: Player, ...any) -> Invoker,
 
 	-- listeners
-	Connect: ( self: Net, func: (...any) -> () ) -> (Connection),
-	Once: ( self: Net, func: (...any) -> () ) -> (Connection),
-	Wait: ( self: Net ) -> (...any),
-	
-	WithTimeoutOf: ( self: Net, timeout: number ) -> ( Net ),
-	OnInvoke: ( self: Net, func: (...any) -> (...any) ) -> (),
+	Connect: (self: Net, func: (...any) -> ()) -> Connection,
+	Once: (self: Net, func: (...any) -> ()) -> Connection,
+	Wait: (self: Net) -> ...any,
 
+	WithTimeoutOf: (self: Net, timeout: number) -> Net,
+	OnInvoke: (self: Net, func: (...any) -> ...any) -> (),
 } & DataTypes.List
 
 return class
