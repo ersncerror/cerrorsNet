@@ -329,24 +329,33 @@ end
 
 -- un/stable methods
 
+function class:Unstable()
+	assert(not self._response, `[CNet]: Response net "{self.Name}" cannot be change to unstable net.`)
+	self._unstable = true
+
+	return self
+end
+
 function class:Fire(player, ...)
 	assert(typeof(player) == "Instance", `Parameter 1 is a non-Instance value, got value of type "{typeof(player)}".`)
 	assert(player:IsA("Player"), `Parameter 1 is a non-Player instance, got instance of class "{player.ClassName}".`)
 
 	local datas = { ... }
 
-	local plrPackets = setPlayerPacket(player)
-	writePacketInfo(self, plrPackets.stable, datas, self._dataTypes)
-	plrPackets.stable:Write(datas, self._dataTypes)
+	local plrPackets = setPlayerPacket(player, self._unstable)
+	local packetToWrite = self._unstable and plrPackets.unstable or plrPackets.stable
+
+	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
+	packetToWrite:Write(datas, self._dataTypes)
 end
 
 function class:FireAll(...)
 	local datas = { ... }
 	
-	writePacketInfo(self, globalPackets, datas, self._dataTypes)
-	globalPackets:Write(datas, self._dataTypes)
-	
-	print( readu8(globalPackets.b, globalPackets.offset - 1) )
+	local packetToWrite = self._unstable and unstablePacket or globalPackets
+
+	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
+	packetToWrite:Write(datas, self._dataTypes)
 end
 
 function class:Connect(func)
@@ -470,6 +479,7 @@ export type Net = {
 
 	new: (name: string, ...DataType) -> (Net),
 	Response: ( self: Net, ...DataType ) -> (Net),
+	Unstable: ( self: Net ) -> (Net),
 
 	-- speakers
 	Fire: (self: Net, player: Player, ...any) -> (),
