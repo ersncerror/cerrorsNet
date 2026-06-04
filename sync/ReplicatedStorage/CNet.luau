@@ -128,7 +128,7 @@ local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any },
 
 	if packetToWrite.offset + 3 + size >= BYTES_PER_FRAME then
 		warn(
-			`[CNet]: Not enough space to write! {3 + size} bytes is required, but only have space of {BYTES_PER_FRAME - packetToWrite.offset} bytes.`
+			`[CNet]: Packet is too large and cannot write, {3 + size} bytes is required, spaces left {BYTES_PER_FRAME - packetToWrite.offset} bytes.`
 		)
 		return
 	end
@@ -381,6 +381,7 @@ function class:Connect(func)
 		for _, packet in self._queuedPackets do
 			task.spawn(func, table.unpack(packet))
 		end
+		table.clear(self._queuedPackets)
 	end
 
 	return connection
@@ -468,6 +469,8 @@ function class:OnInvoke(func)
 			handleResponsePacket(self, datas)
 		end
 	end
+
+	table.clear(self._queuedPackets)
 end
 
 -- Initialize --
