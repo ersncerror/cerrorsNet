@@ -1,8 +1,9 @@
 local CNet = require(game:GetService("ReplicatedStorage").CNet)
 
-local myNet = CNet.new("MyNet", CNet.uint8):Response(CNet.uint8)
+local struct = CNet.Schema.new({ ["hello"] = CNet.uint8 })
 
-myNet:OnInvoke(function(...)
+local myNet = CNet.new("MyNet", struct)
+
+myNet:Connect(function(...)
 	print(...)
-	return 2
 end)

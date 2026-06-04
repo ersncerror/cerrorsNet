@@ -9,6 +9,7 @@ end
 
 export type List = {
 	uint8: DataType,
+	Instance: DataType
 }
 
 return list

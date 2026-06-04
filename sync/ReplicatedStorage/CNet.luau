@@ -2,6 +2,7 @@ local RunService = game:GetService("RunService")
 
 -- modules
 local DataTypes = require(script.DataTypes)
+local Schema = require(script.Schema)
 local Invoker = require(script.Invoker)
 local Packet = require(script.Packet)
 local types = require(script._types)
@@ -467,6 +468,8 @@ function class:OnInvoke(func)
 end
 
 -- Initialize --
+class.Schema = Schema
+
 for name, dataType in DataTypes do
 	class[name] = dataType
 end
@@ -507,6 +510,8 @@ export type Connection = {
 }
 
 export type Net = {
+	Schema: Schema.Schema,
+
 	Name: string,
 
 	-- main properties

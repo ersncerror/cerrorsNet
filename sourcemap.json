@@ -69,6 +69,14 @@
               ],
               "children": [
                 {
+                  "name": "Instance",
+                  "className": "ModuleScript",
+                  "guid": "17548680",
+                  "filePaths": [
+                    "sync/ReplicatedStorage/CNet/DataTypes/Instance.luau"
+                  ]
+                },
+                {
                   "name": "uint8",
                   "className": "ModuleScript",
                   "guid": "139230",
@@ -92,6 +100,14 @@
               "guid": "139228",
               "filePaths": [
                 "sync/ReplicatedStorage/CNet/Packet.luau"
+              ]
+            },
+            {
+              "name": "Schema",
+              "className": "ModuleScript",
+              "guid": "18202823",
+              "filePaths": [
+                "sync/ReplicatedStorage/CNet/Schema.luau"
               ]
             }
           ]
