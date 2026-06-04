@@ -1,14 +1,7 @@
 local CNet = require(game:GetService("ReplicatedStorage").CNet)
 
-local myNet = CNet.new("MyNet", CNet.uint8):Unstable()
+local myNet = CNet.new("MyNet", CNet.uint8)
 
-local counter = 0
-
-while task.wait() do
-	if counter > 255 then
-		counter = 0
-	end
-	
-	myNet:FireAll(counter)
-	counter += 1
+while task.wait(0.1) do
+	myNet:FireAll(1)
 end

@@ -28,6 +28,8 @@ local BYTES_PER_FRAME = 2048
 local MAX_QUEUED_PACKETS = 128 -- this is for nets if they don't have listeners.
 local MAX_CACHE_PACKETS = 64 -- this is for nets if they aren't registered.
 
+local isClient = RunService:IsClient()
+
 local idCounter = 1
 
 -- packets
@@ -51,7 +53,7 @@ class.__index = class
 local function disconnect(self: Connection)
 	self._previous._next = self._next
 	self._next._previous = self._previous
-	table.clear(self)
+	task.defer( table.clear, self )
 end
 
 local function queuePacket(self: Net, packet: {any})
@@ -78,7 +80,7 @@ local function sendToListeners(self: Net, packet: {any})
 	local connection = self._eventListeners._next :: Connection
 
 	while connection ~= self._eventListeners do
-
+		
 		if connection.func then
 			task.spawn(connection.func, unpack(packet))
 		elseif connection.thread then
@@ -337,8 +339,9 @@ function class:Unstable()
 end
 
 function class:Fire(player, ...)
-	assert(typeof(player) == "Instance", `Parameter 1 is a non-Instance value, got value of type "{typeof(player)}".`)
-	assert(player:IsA("Player"), `Parameter 1 is a non-Player instance, got instance of class "{player.ClassName}".`)
+	assert(not isClient, `Fire is not supported on client, you should use :FireAll instead.`)
+	assert(typeof(player) == "Instance", `Target to fire is a non-Instance value, got value of type "{typeof(player)}".`)
+	assert(player:IsA("Player"), `Target to fire is a non-Player instance, got instance of class "{player.ClassName}".`)
 
 	local datas = { ... }
 
@@ -375,6 +378,35 @@ function class:Connect(func)
 	end
 
 	return connection
+end
+
+function class:Once(func)
+	local connection = {}
+	connection._next = self._eventListeners
+	connection._previous = self._eventListeners._previous
+	connection.Disconnect = disconnect
+	connection.func = function(...)
+		connection:Disconnect()
+		func(...)
+	end
+
+	self._eventListeners._previous._next = connection
+	self._eventListeners._previous = connection
+
+	return connection
+end
+
+function class:Wait()
+	local connection = {}
+	connection._next = self._eventListeners
+	connection._previous = self._eventListeners._previous
+	connection.thread = coroutine.running()
+	connection.Disconnect = disconnect
+
+	self._eventListeners._previous._next = connection
+	self._eventListeners._previous = connection
+
+	return coroutine.yield()
 end
 
 -- response methods
@@ -415,6 +447,12 @@ function class:OnInvoke(func)
 	assert(typeof(func) == "function", `Could not use {typeof(func)} as a invoke handler.`)
 
 	self._onInvoke = func
+
+	if #self._queuedPackets > 0 then
+		for _, datas in self._queuedPackets do
+			handleResponsePacket(self, datas)
+		end
+	end
 end
 
 -- Initialize --
@@ -422,7 +460,7 @@ for name, dataType in DataTypes do
 	class[name] = dataType
 end
 
-if RunService:IsServer() then
+if not isClient then
 	remoteEvent = Instance.new("RemoteEvent")
 	unreliRemoteEvent = Instance.new("UnreliableRemoteEvent")
 
@@ -452,7 +490,7 @@ export type Connection = {
 	_next: Connection,
 	_previous: Connection,
 	func: () -> ()?,
-	thread: () -> ()?,
+	thread: thread?,
 
 	Disconnect: ( self: Connection ) -> (),
 }
@@ -489,7 +527,9 @@ export type Net = {
 	InvokeClient: ( self: Net, player: Player, ...any ) -> (...any),
 
 	-- listeners
-	Connect: ( self: Net, func: (...any) -> () ) -> Connection,
+	Connect: ( self: Net, func: (...any) -> () ) -> (Connection),
+	Once: ( self: Net, func: (...any) -> () ) -> (Connection),
+	Wait: ( self: Net ) -> (...any),
 
 	OnInvoke: ( self: Net, func: (...any) -> (...any) ) -> (),
 
