@@ -35,7 +35,7 @@ local CNet = require("path/to/the/module")
 
 local myNet = CNet.new("myNet", CNet.uint8 ):Response(CNet.uint8):WithTimeoutOf(1)
 
-myNet:InvokeServer(1):InvokeSuccess(function(number)
+myNet:InvokeServer(1):Success(function(number)
     print(number) -- 2
 end):Timeout(function() -- nothing will be return if timeout
     print("Timeout!")

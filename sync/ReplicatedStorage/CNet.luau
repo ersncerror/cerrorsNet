@@ -2,9 +2,10 @@ local RunService = game:GetService("RunService")
 
 -- modules
 local DataTypes = require(script.DataTypes)
-local Schema = require(script.Schema)
-local Invoker = require(script.Invoker)
-local Packet = require(script.Packet)
+local Schema = require(script.Classes.Schema)
+local Invoker = require(script.Classes.Invoker)
+local Packet = require(script.Classes.Packet)
+local Configuration = require(script.Configuration)
 local types = require(script._types)
 
 -- types
@@ -27,10 +28,10 @@ local remoteEvent: RemoteEvent
 local unreliRemoteEvent: UnreliableRemoteEvent
 
 -- variables
-local DEFAULT_TIMEOUT = 5 -- when net is changed to response, before :WithTimeoutOf call.
-local BYTES_PER_FRAME = 2048
-local MAX_QUEUED_PACKETS = 128 -- this is for nets if they don't have listeners.
-local MAX_CACHE_PACKETS = 64 -- this is for nets if they aren't registered.
+local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
+local BYTES_PER_FRAME = Configuration.BYTES_PER_FRAME
+local MAX_QUEUED_PACKETS = Configuration.MAX_QUEUED_PACKETS
+local MAX_CACHE_PACKETS = Configuration.MAX_CACHE_PACKETS
 
 local isClient = RunService:IsClient()
 

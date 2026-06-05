@@ -1,4 +1,4 @@
-local types = require(script.Parent._types)
+local types = require(script.Parent.Parent._types)
 type Packet = types.Packet
 
 local newBuffer = buffer.create
