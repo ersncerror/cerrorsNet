@@ -89,7 +89,7 @@ export type Invoker = {
 
 	_callSolver: (self: Invoker, solver: enum, ...any) -> (),
 
-	Invoke: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	Success: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Timeout: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Cancel: (self: Invoker) -> (),
 }
