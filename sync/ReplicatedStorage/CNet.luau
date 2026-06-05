@@ -33,6 +33,8 @@ local BYTES_PER_FRAME = Configuration.BYTES_PER_FRAME
 local MAX_QUEUED_PACKETS = Configuration.MAX_QUEUED_PACKETS
 local MAX_CACHE_PACKETS = Configuration.MAX_CACHE_PACKETS
 
+local INVOKE_TOO_FAST = "[CNet]: Slow down your invokes! There's already a invoke in process."
+
 local isClient = RunService:IsClient()
 
 local idCounter = 1
@@ -125,6 +127,11 @@ local function estimateDataSize(datas: { any }, dataTypes: { DataType })
 end
 
 local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any }, dataTypes: { DataType })
+	if #datas ~= #dataTypes then
+		warn(`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but only have {#datas} datas to write.`)
+		return
+	end
+	
 	local size = estimateDataSize(datas, dataTypes)
 
 	if packetToWrite.offset + 3 + size >= BYTES_PER_FRAME then
@@ -136,6 +143,7 @@ local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any },
 
 	writeu8(packetToWrite.b, packetToWrite.offset, self._id) -- 1b
 	writeu16(packetToWrite.b, packetToWrite.offset + 1, size) -- 2b
+
 	packetToWrite.offset += 3
 end
 
@@ -274,7 +282,9 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		end
 
 		-- unserialize packet
-		local datas, newOffset = unserialize(packet, offset, net._dataTypes)
+		local readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
+
+		local datas, newOffset = unserialize(packet, offset, readers)
 		offset = newOffset
 
 		if net._response then
@@ -446,6 +456,11 @@ function class:WithTimeoutOf(timeout)
 end
 
 function class:InvokeServer(...)
+	if self._waitingForResponse then
+		warn(INVOKE_TOO_FAST)
+		return
+	end
+
 	local datas = { ... }
 
 	writePacketInfo(self, globalPackets, datas, self._dataTypes)
@@ -456,6 +471,11 @@ function class:InvokeServer(...)
 end
 
 function class:InvokeClient(player, ...)
+	if self._waitingForResponse then
+		warn(INVOKE_TOO_FAST)
+		return
+	end
+
 	local datas = { ... }
 
 	local plrPacket = setPlayerPacket(player)

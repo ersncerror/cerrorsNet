@@ -124,6 +124,11 @@
                   ]
                 }
               ]
+            },
+            {
+              "name": "VERSION",
+              "className": "StringValue",
+              "guid": "12266750"
             }
           ]
         }

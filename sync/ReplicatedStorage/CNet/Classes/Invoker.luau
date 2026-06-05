@@ -6,6 +6,7 @@ type enum = {
 type enumList = {
 	success: enum,
 	timeout: enum,
+	onSolve: enum
 }
 
 local enums = {
@@ -17,6 +18,10 @@ local enums = {
 		name = "timeout",
 		value = 2,
 	},
+	["onSolve"] = {
+		name = "onSolve",
+		value = 3
+	}
 } :: enumList
 
 local class = {} :: Invoker & enumList
@@ -48,6 +53,15 @@ function class:_callSolver(solver, ...)
 	end
 
 	task.spawn(self._solvers[solver.value], ...)
+	
+	if self._solvers[enums.onSolve.value] then
+		task.spawn(self._solvers[solver.value])
+	end
+	
+	if self._await then
+		task.spawn(self._await)
+	end
+	
 	self._solved = true
 end
 
@@ -67,6 +81,19 @@ function class:Timeout(fn)
 	return self
 end
 
+function class:OnSolved(fn)
+	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
+
+	self._solvers[enums.onSolve.value] = fn
+
+	return self
+end
+
+function class:Await()
+	self._await = coroutine.running()
+	return coroutine.yield()
+end
+
 -- cancels the invoke, if response is received, nothing will happen.
 function class:Cancel()
 	if self._timeout then
@@ -83,15 +110,18 @@ end
 export type Invoker = {
 	_solved: boolean,
 	_timeout: thread?,
+	_await: thread?,
 	_solvers: { [enum]: (...any) -> () },
 
 	new: (timeout: number?) -> Invoker,
 
 	_callSolver: (self: Invoker, solver: enum, ...any) -> (),
 
-	Success: (self: Invoker, fn: (...any) -> ()) -> Invoker,
-	Timeout: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	Success: (self: Invoker, fn: (...any) -> () ) -> Invoker,
+	Timeout: (self: Invoker, fn: (...any) -> () ) -> Invoker,
+	OnSolved: ( self: Invoker, fn: (...any) -> () ) -> Invoker,
+	Await: ( self: Invoker ) -> (),
 	Cancel: (self: Invoker) -> (),
-}
+} & enumList
 
 return class
