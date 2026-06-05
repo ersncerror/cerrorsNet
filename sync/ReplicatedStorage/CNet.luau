@@ -213,7 +213,7 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?, 
 		end
 
 		local success, result = pcall(self._onInvoke, unpack(datas))
-		local responseDatas = {result}
+		local responseDatas = { result }
 
 		if not success then
 			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
