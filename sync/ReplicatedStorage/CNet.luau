@@ -213,7 +213,7 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?, 
 		end
 
 		local success, result = pcall(self._onInvoke, unpack(datas))
-		local responseDatas = result
+		local responseDatas = {result}
 
 		if not success then
 			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
@@ -304,28 +304,34 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		end
 
 		-- unserialize packet
-		local readers
-		local datas, newOffset
-
-		if net._response and net._waitingForResponse and isInvokeSuccess then
-			readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
-
-			local unserialized = { unserialize(packet, offset, readers) }
-			datas = unserialized[1]
-			newOffset = unserialized[2]
-
-			offset = newOffset
-		end
+		local readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
+		local newOffset
 
 		if net._response then
-			handleResponsePacket(net, datas or {}, player, isInvokeSuccess)
+			offset += 1
+			local datas = {}
+
+			if net._waitingForResponse and not isInvokeSuccess then
+				newOffset = offset
+			else
+				local unserialized = { unserialize(packet, offset, readers) }
+				datas = unserialized[1]
+				newOffset = unserialized[2]
+			end
+
+			handleResponsePacket(net, datas, player, isInvokeSuccess)
 		else
+			local datas, nOffset = unserialize(packet, offset, readers)
+			newOffset = nOffset
+
 			if player then
 				table.insert(datas, 1, player)
 			end
 
 			sendToListeners(net, datas)
 		end
+
+		offset = newOffset
 
 		-- continue to next packet
 		netId = readu8(b, offset)
@@ -517,6 +523,7 @@ function class:InvokeClient(player, ...)
 	self._waitingForResponse = Invoker.new(self._timeout):Timeout(function()
 		self._waitingForResponse = nil
 	end)
+
 	return self._waitingForResponse
 end
 
