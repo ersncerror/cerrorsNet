@@ -51,7 +51,7 @@ function class:_callSolver(solver, ...)
 	self._solved = true
 end
 
-function class:InvokeSuccess(fn)
+function class:Success(fn)
 	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
 
 	self._solvers[enums.success.value] = fn
