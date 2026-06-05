@@ -70,14 +70,14 @@ function class:_callSolver(solver, ...)
 	if not self._solvers[solver.value] then
 		return
 	end
-	
+
 	callSolvers(self, solver, ...)
-	
+
 	if self._solvers[enums.onSolve.value] then
 		callSolvers(self, enums.onSolve)
 	end
 
-	if self._awaits then	
+	if self._awaits then
 		for _, thread in self._awaits do
 			task.spawn(thread)
 		end
