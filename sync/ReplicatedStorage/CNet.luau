@@ -128,10 +128,12 @@ end
 
 local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any }, dataTypes: { DataType })
 	if #datas ~= #dataTypes then
-		warn(`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but only have {#datas} datas to write.`)
+		warn(
+			`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but only have {#datas} datas to write.`
+		)
 		return
 	end
-	
+
 	local size = estimateDataSize(datas, dataTypes)
 
 	if packetToWrite.offset + 3 + size >= BYTES_PER_FRAME then

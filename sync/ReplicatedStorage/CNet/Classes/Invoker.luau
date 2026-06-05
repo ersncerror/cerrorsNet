@@ -6,7 +6,7 @@ type enum = {
 type enumList = {
 	success: enum,
 	timeout: enum,
-	onSolve: enum
+	onSolve: enum,
 }
 
 local enums = {
@@ -20,8 +20,8 @@ local enums = {
 	},
 	["onSolve"] = {
 		name = "onSolve",
-		value = 3
-	}
+		value = 3,
+	},
 } :: enumList
 
 local class = {} :: Invoker & enumList
@@ -53,15 +53,15 @@ function class:_callSolver(solver, ...)
 	end
 
 	task.spawn(self._solvers[solver.value], ...)
-	
+
 	if self._solvers[enums.onSolve.value] then
 		task.spawn(self._solvers[solver.value])
 	end
-	
+
 	if self._await then
 		task.spawn(self._await)
 	end
-	
+
 	self._solved = true
 end
 
@@ -117,10 +117,10 @@ export type Invoker = {
 
 	_callSolver: (self: Invoker, solver: enum, ...any) -> (),
 
-	Success: (self: Invoker, fn: (...any) -> () ) -> Invoker,
-	Timeout: (self: Invoker, fn: (...any) -> () ) -> Invoker,
-	OnSolved: ( self: Invoker, fn: (...any) -> () ) -> Invoker,
-	Await: ( self: Invoker ) -> (),
+	Success: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	Timeout: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	OnSolved: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	Await: (self: Invoker) -> (),
 	Cancel: (self: Invoker) -> (),
 } & enumList
 
