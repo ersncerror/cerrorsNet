@@ -32,10 +32,24 @@ local enums = {
 local class = {} :: Invoker & enumList
 class.__index = class
 
+local function addSolver(self: Invoker, fn: () -> (), enum: enum)
+	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
+
+	self._solvers[enum.value] = self._solvers[enum.value] or {}
+	table.insert(self._solvers[enum.value], fn)
+end
+
+local function callSolvers(self: Invoker, enum: enum, ...)
+	for _, fn in self._solvers[enum.value] do
+		task.spawn(fn, ...)
+	end
+end
+
 function class.new(timeout)
 	local self = setmetatable({}, class)
 	self._solved = false
 	self._solvers = {}
+	self._awaits = {}
 
 	if timeout then
 		self._timeout = task.delay(timeout, self._callSolver, self, enums.timeout)
@@ -56,55 +70,45 @@ function class:_callSolver(solver, ...)
 	if not self._solvers[solver.value] then
 		return
 	end
-
-	task.spawn(self._solvers[solver.value], ...)
-
+	
+	callSolvers(self, solver, ...)
+	
 	if self._solvers[enums.onSolve.value] then
-		task.spawn(self._solvers[solver.value])
+		callSolvers(self, enums.onSolve)
 	end
 
-	if self._await then
-		task.spawn(self._await)
+	if self._awaits then	
+		for _, thread in self._awaits do
+			task.spawn(thread)
+		end
 	end
 
 	self._solved = true
 end
 
 function class:Success(fn)
-	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
-
-	self._solvers[enums.success.value] = fn
-
+	addSolver(self, fn, enums.success)
 	return self
 end
 
 function class:Timeout(fn)
-	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
-
-	self._solvers[enums.timeout.value] = fn
-
+	addSolver(self, fn, enums.timeout)
 	return self
 end
 
 function class:OnSolved(fn)
-	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
-
-	self._solvers[enums.onSolve.value] = fn
-
+	addSolver(self, fn, enums.onSolve)
 	return self
 end
 
 -- when invoke fails (if the side who response this side fails)
 function class:Failed(fn)
-	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
-
-	self._solvers[enums.failed.value] = fn
-
+	addSolver(self, fn, enums.failed)
 	return self
 end
 
 function class:Await()
-	self._await = coroutine.running()
+	table.insert(self._awaits, coroutine.running())
 	return coroutine.yield()
 end
 
@@ -124,8 +128,8 @@ end
 export type Invoker = {
 	_solved: boolean,
 	_timeout: thread?,
-	_await: thread?,
-	_solvers: { [enum]: (...any) -> () },
+	_awaits: { thread }?,
+	_solvers: { [enum | number]: { (...any) -> () } },
 
 	new: (timeout: number?) -> Invoker,
 

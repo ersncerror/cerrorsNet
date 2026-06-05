@@ -11,5 +11,8 @@ while true do
 		:Failed(function()
 			print("oh no!")
 		end)
+		:Timeout(function()
+			print("die")
+		end)
 		:Await()
 end

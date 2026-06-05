@@ -217,7 +217,7 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?, 
 
 		if not success then
 			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
-			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {}, false)
+			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {})
 			return
 		end
 
@@ -281,7 +281,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
-		local isInvokeSuccess = readu8(b, offset + 3) == 1 and true or 0
+		local isInvokeSuccess = readu8(b, offset + 3) == 1 and true or false
 		offset += 3
 
 		if offset + length > lenb(b) then
@@ -496,7 +496,9 @@ function class:InvokeServer(...)
 	writePacketInfo(self, globalPackets, datas, self._dataTypes)
 	globalPackets:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = Invoker.new(self._timeout)
+	self._waitingForResponse = Invoker.new(self._timeout):Timeout(function()
+		self._waitingForResponse = nil
+	end)
 	return self._waitingForResponse
 end
 
@@ -512,7 +514,9 @@ function class:InvokeClient(player, ...)
 	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes)
 	plrPacket.stable:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = Invoker.new(self._timeout)
+	self._waitingForResponse = Invoker.new(self._timeout):Timeout(function()
+		self._waitingForResponse = nil
+	end)
 	return self._waitingForResponse
 end
 
