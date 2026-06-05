@@ -1,11 +1,9 @@
 local CNet = require(game:GetService("ReplicatedStorage").CNet)
 
-local struct = CNet.Schema.new({ ["hello"] = CNet.uint8 })
-
-local myNet = CNet.new("MyNet", struct)
+local myNet = CNet.new("MyNet", CNet.Instance, CNet.uint8):Response(CNet.uint8)
 
 while task.wait(1) do
-	myNet:FireAll({
-		["hello"] = math.floor(tick()) % 5,
-	})
+	myNet:InvokeServer(game:GetService("Players").LocalPlayer, 6):Success(function(...)
+		print(...)
+	end)
 end

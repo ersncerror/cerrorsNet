@@ -369,6 +369,8 @@ function class:FireAll(...)
 end
 
 function class:Connect(func)
+	assert(not self._response, `Cannot use :Connect() on response net, use :OnInvoke instead.`)
+
 	local connection = {}
 	connection._next = self._eventListeners
 	connection._previous = self._eventListeners._previous
@@ -389,6 +391,8 @@ function class:Connect(func)
 end
 
 function class:Once(func)
+	assert(not self._response, `Cannot connect once function to response net.`)
+
 	local connection = {}
 	connection._next = self._eventListeners
 	connection._previous = self._eventListeners._previous
@@ -405,6 +409,8 @@ function class:Once(func)
 end
 
 function class:Wait()
+	assert(not self._response, `Cannot connect wait on a response net.`)
+
 	local connection = {}
 	connection._next = self._eventListeners
 	connection._previous = self._eventListeners._previous
