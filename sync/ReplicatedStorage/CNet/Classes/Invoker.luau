@@ -7,6 +7,7 @@ type enumList = {
 	success: enum,
 	timeout: enum,
 	onSolve: enum,
+	failed: enum,
 }
 
 local enums = {
@@ -21,6 +22,10 @@ local enums = {
 	["onSolve"] = {
 		name = "onSolve",
 		value = 3,
+	},
+	["failed"] = {
+		name = "failed",
+		value = 4,
 	},
 } :: enumList
 
@@ -89,6 +94,15 @@ function class:OnSolved(fn)
 	return self
 end
 
+-- when invoke fails (if the side who response this side fails)
+function class:Failed(fn)
+	assert(typeof(fn) == "function", `[Invoker]: Parameter 1 is not a function. (got {typeof(fn)})`)
+
+	self._solvers[enums.failed.value] = fn
+
+	return self
+end
+
 function class:Await()
 	self._await = coroutine.running()
 	return coroutine.yield()
@@ -120,6 +134,7 @@ export type Invoker = {
 	Success: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Timeout: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	OnSolved: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	Failed: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Await: (self: Invoker) -> (),
 	Cancel: (self: Invoker) -> (),
 } & enumList

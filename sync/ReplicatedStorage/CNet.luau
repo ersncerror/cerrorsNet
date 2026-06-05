@@ -126,7 +126,13 @@ local function estimateDataSize(datas: { any }, dataTypes: { DataType })
 	return size
 end
 
-local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any }, dataTypes: { DataType })
+local function writePacketInfo(
+	self: Net,
+	packetToWrite: Packet,
+	datas: { any },
+	dataTypes: { DataType },
+	invokeSuccess: boolean?
+)
 	if #datas ~= #dataTypes then
 		warn(
 			`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but only have {#datas} datas to write.`
@@ -145,6 +151,11 @@ local function writePacketInfo(self: Net, packetToWrite: Packet, datas: { any },
 
 	writeu8(packetToWrite.b, packetToWrite.offset, self._id) -- 1b
 	writeu16(packetToWrite.b, packetToWrite.offset + 1, size) -- 2b
+
+	if self._response and not self._waitingForResponse then
+		writeu8(packetToWrite.b, packetToWrite.offset + 3, invokeSuccess and 1 or 0)
+		packetToWrite.offset += 1
+	end
 
 	packetToWrite.offset += 3
 end
@@ -182,12 +193,12 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	return result, offset
 end
 
-local function handleResponsePacket(self: Net, datas: { any }, player: Player?)
+local function handleResponsePacket(self: Net, datas: { any }, player: Player?, invokeSuccess: boolean?)
 	if self._waitingForResponse then
 		-- this is the invoke caller
 		local invoker = self._waitingForResponse
 		self._waitingForResponse = nil
-		invoker:_callSolver(Invoker.success, unpack(datas))
+		invoker:_callSolver(invokeSuccess and Invoker.success or Invoker.failed, unpack(datas))
 	else
 		-- response the invoke caller
 
@@ -201,13 +212,21 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?)
 			return
 		end
 
-		local responseDatas = { self._onInvoke(unpack(datas)) }
+		local success, result = pcall(self._onInvoke, unpack(datas))
+		local responseDatas = result
+
+		if not success then
+			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
+			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {}, false)
+			return
+		end
 
 		writePacketInfo(
 			self,
 			player and playerPackets[player].stable or globalPackets,
 			responseDatas,
-			self._responseDataTypes
+			self._responseDataTypes,
+			true
 		)
 
 		if player then
@@ -262,6 +281,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
+		local isInvokeSuccess = readu8(b, offset + 3) == 1 and true or 0
 		offset += 3
 
 		if offset + length > lenb(b) then
@@ -284,13 +304,21 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		end
 
 		-- unserialize packet
-		local readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
+		local readers
+		local datas, newOffset
 
-		local datas, newOffset = unserialize(packet, offset, readers)
-		offset = newOffset
+		if net._response and net._waitingForResponse and isInvokeSuccess then
+			readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
+
+			local unserialized = { unserialize(packet, offset, readers) }
+			datas = unserialized[1]
+			newOffset = unserialized[2]
+
+			offset = newOffset
+		end
 
 		if net._response then
-			handleResponsePacket(net, datas, player)
+			handleResponsePacket(net, datas or {}, player, isInvokeSuccess)
 		else
 			if player then
 				table.insert(datas, 1, player)

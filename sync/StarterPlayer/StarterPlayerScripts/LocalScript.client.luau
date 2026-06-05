@@ -8,5 +8,8 @@ while true do
 		:Success(function(...)
 			print(...)
 		end)
+		:Failed(function()
+			print("oh no!")
+		end)
 		:Await()
 end
