@@ -33,8 +33,6 @@ local BYTES_PER_FRAME = Configuration.BYTES_PER_FRAME
 local MAX_QUEUED_PACKETS = Configuration.MAX_QUEUED_PACKETS
 local MAX_CACHE_PACKETS = Configuration.MAX_CACHE_PACKETS
 
-local INVOKE_TOO_FAST = "[CNet]: Slow down your invokes! There's already a invoke in process."
-
 local isClient = RunService:IsClient()
 
 local idCounter = 1
@@ -55,6 +53,15 @@ local packetDropCounters = {} :: { [number]: number }
 
 local class = {} :: Net
 class.__index = class
+
+local function findFirstEmptyKeyInArray(array: { any }): number
+	local index = 1
+	while array[index] ~= nil do
+		index += 1
+	end
+
+	return index
+end
 
 -- Net work related --
 local function disconnect(self: Connection)
@@ -131,6 +138,7 @@ local function writePacketInfo(
 	packetToWrite: Packet,
 	datas: { any },
 	dataTypes: { DataType },
+	invokeId: number?,
 	invokeSuccess: boolean?
 )
 	if #datas ~= #dataTypes then
@@ -153,8 +161,9 @@ local function writePacketInfo(
 	writeu16(packetToWrite.b, packetToWrite.offset + 1, size) -- 2b
 
 	if self._response and not self._waitingForResponse then
-		writeu8(packetToWrite.b, packetToWrite.offset + 3, invokeSuccess and 1 or 0)
-		packetToWrite.offset += 1
+		writeu8(packetToWrite.b, packetToWrite.offset + 3, invokeId)
+		writeu8(packetToWrite.b, packetToWrite.offset + 4, invokeSuccess and 1 or 0)
+		packetToWrite.offset += 2
 	end
 
 	packetToWrite.offset += 3
@@ -193,11 +202,17 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	return result, offset
 end
 
-local function handleResponsePacket(self: Net, datas: { any }, player: Player?, invokeSuccess: boolean?)
-	if self._waitingForResponse then
+local function handleResponsePacket(
+	self: Net,
+	datas: { any },
+	player: Player?,
+	invokeId: number?,
+	invokeSuccess: boolean?
+)
+	if self._pendingInvokes[invokeId] then
 		-- this is the invoke caller
-		local invoker = self._waitingForResponse
-		self._waitingForResponse = nil
+		local invoker = self._pendingInvokes[invokeId]
+		self._pendingInvokes[invokeId] = nil
 		invoker:_callSolver(invokeSuccess and Invoker.success or Invoker.failed, unpack(datas))
 	else
 		-- response the invoke caller
@@ -217,7 +232,7 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?, 
 
 		if not success then
 			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
-			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {})
+			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {}, invokeId)
 			return
 		end
 
@@ -226,6 +241,7 @@ local function handleResponsePacket(self: Net, datas: { any }, player: Player?, 
 			player and playerPackets[player].stable or globalPackets,
 			responseDatas,
 			self._responseDataTypes,
+			invokeId,
 			true
 		)
 
@@ -281,7 +297,8 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
-		local isInvokeSuccess = readu8(b, offset + 3) == 1 and true or false
+		local invokeId = readu8(b, offset + 3)
+		local isInvokeSuccess = readu8(b, offset + 4) == 1 and true or false
 		offset += 3
 
 		if offset + length > lenb(b) then
@@ -308,7 +325,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local newOffset
 
 		if net._response then
-			offset += 1
+			offset += 2
 			local datas = {}
 
 			if net._waitingForResponse and not isInvokeSuccess then
@@ -319,7 +336,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 				newOffset = unserialized[2]
 			end
 
-			handleResponsePacket(net, datas, player, isInvokeSuccess)
+			handleResponsePacket(net, datas, player, invokeId, isInvokeSuccess)
 		else
 			local datas, nOffset = unserialize(packet, offset, readers)
 			newOffset = nOffset
@@ -478,6 +495,7 @@ function class:Response(...)
 	self._timeout = DEFAULT_TIMEOUT
 
 	self._responseDataTypes = { ... }
+	self._pendingInvokes = {}
 
 	return self
 end
@@ -492,39 +510,32 @@ function class:WithTimeoutOf(timeout)
 end
 
 function class:InvokeServer(...)
-	if self._waitingForResponse then
-		warn(INVOKE_TOO_FAST)
-		return
-	end
-
 	local datas = { ... }
 
-	writePacketInfo(self, globalPackets, datas, self._dataTypes)
+	local id = findFirstEmptyKeyInArray(self._pendingInvokes)
+
+	writePacketInfo(self, globalPackets, datas, self._dataTypes, id)
 	globalPackets:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = Invoker.new(self._timeout):Timeout(function()
-		self._waitingForResponse = nil
+	self._pendingInvokes[id] = Invoker.new(self._timeout):Timeout(function()
+		self._pendingInvokes[id] = nil
 	end)
-	return self._waitingForResponse
+	return self._pendingInvokes[id]
 end
 
 function class:InvokeClient(player, ...)
-	if self._waitingForResponse then
-		warn(INVOKE_TOO_FAST)
-		return
-	end
-
 	local datas = { ... }
 
 	local plrPacket = setPlayerPacket(player)
-	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes)
+	local id = findFirstEmptyKeyInArray(self._pendingInvokes)
+
+	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes, id)
 	plrPacket.stable:Write(datas, self._dataTypes)
 
-	self._waitingForResponse = Invoker.new(self._timeout):Timeout(function()
-		self._waitingForResponse = nil
+	self._pendingInvokes[id] = Invoker.new(self._timeout):Timeout(function()
+		self._pendingInvokes[id] = nil
 	end)
-
-	return self._waitingForResponse
+	return self._pendingInvokes[id]
 end
 
 function class:OnInvoke(func)
@@ -602,8 +613,8 @@ export type Net = {
 	-- response net properties
 	_response: boolean?,
 	_timeout: number?,
-	_waitingForResponse: Invoker?,
 	_responseDataTypes: { DataType }?,
+	_pendingInvokes: { [number]: Invoker },
 	_onInvoke: (...any) -> ...any,
 
 	new: (name: string, ...DataType) -> Net,
