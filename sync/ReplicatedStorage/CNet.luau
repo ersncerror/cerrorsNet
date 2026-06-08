@@ -160,7 +160,7 @@ local function writePacketInfo(
 	writeu8(packetToWrite.b, packetToWrite.offset, self._id) -- 1b
 	writeu16(packetToWrite.b, packetToWrite.offset + 1, size) -- 2b
 
-	if self._response and not self._waitingForResponse then
+	if self._response then
 		writeu8(packetToWrite.b, packetToWrite.offset + 3, invokeId)
 		writeu8(packetToWrite.b, packetToWrite.offset + 4, invokeSuccess and 1 or 0)
 		packetToWrite.offset += 2
@@ -321,14 +321,14 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		end
 
 		-- unserialize packet
-		local readers = (net._response and net._waitingForResponse) and net._responseDataTypes or net._dataTypes
+		local readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
 		local newOffset
 
 		if net._response then
 			offset += 2
 			local datas = {}
 
-			if net._waitingForResponse and not isInvokeSuccess then
+			if net._pendingInvokes[invokeId] and not isInvokeSuccess then
 				newOffset = offset
 			else
 				local unserialized = { unserialize(packet, offset, readers) }
