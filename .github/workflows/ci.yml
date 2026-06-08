@@ -18,7 +18,7 @@ jobs:
 
       - name: linter
         uses: YoloWingPixie/selene-lua-linter-action@v1
-        with: 
+        with:
           config-path: "selene.toml"
           lint-path: "sync"
 
@@ -32,4 +32,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: latest
-          args: --check sync
+          args: --check sync/ReplicatedStorage

@@ -8,6 +8,7 @@ type enumList = {
 	timeout: enum,
 	onSolve: enum,
 	failed: enum,
+	afterSolved: enum,
 }
 
 local enums = {
@@ -26,6 +27,10 @@ local enums = {
 	["failed"] = {
 		name = "failed",
 		value = 4,
+	},
+	["afterSolved"] = {
+		name = "afterSolved",
+		value = 5,
 	},
 } :: enumList
 
@@ -84,6 +89,10 @@ function class:_callSolver(solver, ...)
 	end
 
 	self._solved = true
+
+	if self._solvers[enums.afterSolved.value] then
+		callSolvers(self, enums.afterSolved)
+	end
 end
 
 function class:Success(fn)
@@ -98,6 +107,11 @@ end
 
 function class:OnSolved(fn)
 	addSolver(self, fn, enums.onSolve)
+	return self
+end
+
+function class:AfterSolved(fn)
+	addSolver(self, fn, enums.afterSolved)
 	return self
 end
 
@@ -139,6 +153,7 @@ export type Invoker = {
 	Timeout: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	OnSolved: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Failed: (self: Invoker, fn: (...any) -> ()) -> Invoker,
+	AfterSolved: (self: Invoker, fn: (...any) -> ()) -> Invoker,
 	Await: (self: Invoker) -> (),
 	Cancel: (self: Invoker) -> (),
 } & enumList
