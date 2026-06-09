@@ -4,6 +4,16 @@ type Packet = types.Packet
 
 local class = {} :: Schema
 
+local function getKeys(t: { [any]: any })
+	local keys = {}
+
+	for k, _ in t do
+		table.insert(keys, k)
+	end
+
+	return keys
+end
+
 -- sets the bit on provided position to true.
 local function set(valueToSet: number, pos: number)
 	local mask = bit32.lshift(1, pos)
@@ -78,8 +88,46 @@ function class.new(struct)
 	return dataType
 end
 
+function class.dict(keyType, valueType)
+	local dataType = {}
+
+	dataType.write = function(packet: Packet, value: { [any]: any })
+		buffer.writeu8(packet.b, packet.offset, #getKeys(value))
+		packet.offset += 1
+
+		-- this will be automatic increased by packet:Write()
+		for k, v in value do
+			packet:Write({ k, v }, { keyType, valueType })
+		end
+
+		-- so we will return 0 here
+		return 0
+	end
+
+	dataType.read = function(packet: Packet, offset: number)
+		local keys = buffer.readu8(packet.b, offset)
+		local result = {}
+
+		local increased = 1
+		for _ = 1, keys do
+			local k, kOffset = keyType.read(packet, offset + increased)
+			increased += kOffset or keyType.bytes
+
+			local v, vOffset = valueType.read(packet, offset + increased)
+			increased += vOffset or valueType.bytes
+
+			result[k] = v
+		end
+
+		return result, increased
+	end
+
+	return dataType
+end
+
 export type Schema = {
 	new: (struct: { [string]: DataType }) -> DataType,
+	dict: (keyType: DataType, valueType: DataType) -> DataType,
 }
 
 return class
