@@ -8,9 +8,8 @@ export type Packet = {
 }
 
 export type DataType = {
-	bytes: number?,
-	write: (packet: Packet, value: any) -> number?,
-	read: (packet: Packet, offset: number) -> (any, number?),
+	write: (packet: Packet, value: any) -> (),
+	read: (packet: Packet, offset: number) -> (any, number),
 }
 
 return {}

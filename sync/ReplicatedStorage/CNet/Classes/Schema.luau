@@ -93,22 +93,24 @@ function class.dict(keyType, valueType)
 
 	dataType.write = function(packet: Packet, value: { [any]: any })
 		buffer.writeu8(packet.b, packet.offset, #getKeys(value))
+		packet.offset += 1
 
-		local increased = 1
 		for k, v in value do
-			increased += keyType.write(packet, k) or keyType.bytes
-			increased += valueType.write(packet, v) or valueType.bytes
+			keyType.write(packet, k)
+			valueType.write(packet, v)
 		end
-
-		-- so we will return 0 here
-		return increased
 	end
 
 	dataType.read = function(packet: Packet, offset: number)
 		local keys = buffer.readu8(packet.b, offset)
 		local result = {}
-
+		
+		print(offset, keys)
+		
 		local increased = 1
+		
+		print(keys)
+		
 		for _ = 1, keys do
 			local k, kOffset = keyType.read(packet, offset + increased)
 			increased += kOffset or keyType.bytes

@@ -81,20 +81,19 @@ See the DataTypes under the library, add your own custom data types under module
 **A vaild data type should follow like this:**<br>
 - A write function, takes packet, and value to write.
 - A read function, takes packet, and a offset.
-- An optional value called "bytes", if the number of bytes occupied by this data type does not change.
-- - if not, then write and read function should always return how many bytes is occupied. (read function should return it as #2 parameter, due to first one is the value which is readed.)
-- **Know that you SHOULDN'T add packet's offset in these functions**, instead, returns a number to tell how many offset is increased.
+- write function is required to increase the packet offset, otherwise, it will possibly cause a error in library.
+- read function is different, return increased offset as #2 parameter.
 
 ### Example
 ```lua
 -- sync/ReplicatedStorage/CNet/DataTypes/uint8.luau
 return {
-	bytes = 1, -- this will be 1 byte since u8 is always occupies 1 byte.
 	write = function(packet: Packet, value: number)
-		write(packet.b, packet.offset, math.floor(value))
+		buffer.writeu8(packet.b, packet.offset, math.floor(value))
+		packet.offset += 1
 	end,
 	read = function(packet: Packet, offset: number)
-		return read(packet.b, offset)
+		return buffer.readu8(packet.b, offset), 1
 	end,
 }
 ```

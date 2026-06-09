@@ -1,23 +1,15 @@
 local CNet = require(game:GetService("ReplicatedStorage").CNet)
 
-local myNet = CNet.new("MyNet", CNet.uint8):Response(CNet.uint8)
+local myNet = CNet.new("MyNet", CNet.Schema.dict( CNet.uint8, CNet.uint8 ))
 
 local player = game:GetService("Players"):FindFirstChildOfClass("Player") or game:GetService("Players").PlayerAdded:Wait()
 
 while true do
-	for i = 1, 5 do
-		myNet
-			:InvokeClient(player, i)
-			:Success(function(...)
-				print(...)
-			end)
-			:Failed(function()
-				print("oh no!")
-			end)
-			:Timeout(function()
-				print("die")
-			end)
-	end
-
+	myNet:Fire(player, {
+		[1] = 2,
+		[2] = 3,
+		[3] = 4,
+		[4] = 5,
+	})
 	task.wait(1)
 end

@@ -123,14 +123,13 @@ local function setPlayerPacket(player: Player, unreli: boolean?): playerPacket
 end
 
 local function estimateDataSize(datas: { any }, dataTypes: { DataType })
-	local size = 0
+	estimatePacket.offset = 0
 
 	for index, dataType in dataTypes do
-		size += dataType.write(estimatePacket, datas[index]) or dataType.bytes
+		dataType.write(estimatePacket, datas[index])
 	end
 
-	estimatePacket.offset = 0
-	return size
+	return estimatePacket.offset + 1
 end
 
 local function writePacketInfo(
@@ -177,7 +176,7 @@ local function cachePacketToUnreadyNet(netId: number, packetToCache: buffer)
 		packetDropCounters[netId] = packetDropCounters[netId] or 0
 		packetDropCounters[netId] += 1
 
-		if packetDropCounters[netId] % 4294967296 == 0 then
+		if 4294967296 % packetDropCounters[netId] == 0 then
 			warn(
 				`[CNet]: Cached packets overflowed, did you just forget to create a net with id of "{netId}"? ({packetDropCounters[netId]} packets dropped.)`
 			)
@@ -196,7 +195,7 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	for _, dataType in dataTypes do
 		local value, increased = dataType.read(packet, offset)
 		table.insert(result, value)
-		offset += increased or dataType.bytes
+		offset += increased
 	end
 
 	return result, offset
@@ -297,8 +296,12 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
+
+		-- invokeId and isInvokeSuccess will be ignored if
+		-- net is not a response net.
 		local invokeId = readu8(b, offset + 3)
 		local isInvokeSuccess = readu8(b, offset + 4) == 1 and true or false
+
 		offset += 3
 
 		if offset + length > lenb(b) then
