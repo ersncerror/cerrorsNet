@@ -370,24 +370,29 @@ function class.new(name, ...)
 	self.Name = name
 	self._dataTypes = { ... }
 
-	self._id = script:GetAttribute(name) or idCounter
-	idCounter += script:GetAttribute(name) and 0 or 1
+	if RunService:IsClient() then
+		if script:GetAttribute(name) then
+			local connect
+			connect = script:GetAttributeChangedSignal(name):Connect(function()
+				self._id = script:GetAttribute(name)
+				netById[self._id] = self
+				nets[self.Name] = self
 
-	-- if network lags or other possible siuation to cause this problem
-	-- could make this net have a id collision from a existed net.
-
-	if netById[self._id] then
-		-- reseparate id
-		local collidedNet = netById[self._id] :: Net
-		collidedNet._id = script:GetAttribute(collidedNet.Name) or idCounter
-		idCounter += script:GetAttribute(collidedNet.Name) and 0 or 1
-
-		netById[collidedNet._id] = collidedNet
+				if self._id ~= nil then
+					connect:Disconnect()
+					connect = nil
+				end
+			end)
+		else
+			self._id = script:GetAttribute(name)
+			netById[self._id] = self
+			nets[self.Name] = self
+		end
+	else
+		self._id = idCounter
+		idCounter += 1
+		script:SetAttribute(self.Name, self._id)
 	end
-
-	netById[self._id] = self
-	nets[self.Name] = self
-	script:SetAttribute(self.Name, self._id)
 
 	-- setup net works
 	self._eventListeners = {}

@@ -5,11 +5,11 @@ local newBuffer = buffer.create
 
 local class = {} :: types.Packet
 
-local function write(self: Packet, datas: { any }, dataTypes: { types.DataType }): number
+local function write(self: Packet, datas: { any }, dataTypes: { types.DataType })
 	if #datas ~= #dataTypes then
 		warn(`[Packet Write]: Expect to write {#dataTypes} datas, but only got {#datas} datas here.`)
 	end
-	
+
 	for i, dataType in dataTypes do
 		dataType.write(self, datas[i])
 	end

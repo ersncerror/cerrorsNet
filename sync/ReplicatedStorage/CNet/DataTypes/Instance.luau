@@ -9,7 +9,7 @@ return {
 		table.insert(packet.refs, value)
 		local instId = #packet.refs
 		write(packet.b, packet.offset, instId)
-		
+
 		packet.offset += 1
 	end,
 	read = function(packet: Packet, offset: number)
