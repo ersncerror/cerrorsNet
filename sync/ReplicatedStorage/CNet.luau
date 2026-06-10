@@ -297,11 +297,6 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
 
-		-- invokeId and isInvokeSuccess will be ignored if
-		-- net is not a response net.
-		local invokeId = readu8(b, offset + 3)
-		local isInvokeSuccess = readu8(b, offset + 4) == 1 and true or false
-
 		offset += 3
 
 		if offset + length > lenb(b) then
@@ -324,12 +319,16 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		end
 
 		-- unserialize packet
-		local readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
+		local readers
 		local newOffset
 
 		if net._response then
-			offset += 2
+			local invokeId = readu8(b, offset + 3)
+			local isInvokeSuccess = readu8(b, offset + 4) == 1 and true or false
 			local datas = {}
+
+			readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
+			offset += 2
 
 			if net._pendingInvokes[invokeId] and not isInvokeSuccess then
 				newOffset = offset
@@ -341,6 +340,8 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 
 			handleResponsePacket(net, datas, player, invokeId, isInvokeSuccess)
 		else
+			readers = net._dataTypes
+
 			local datas, nOffset = unserialize(packet, offset, readers)
 			newOffset = nOffset
 
@@ -372,6 +373,10 @@ function class.new(name, ...)
 
 	if RunService:IsClient() then
 		if script:GetAttribute(name) then
+			self._id = script:GetAttribute(name)
+			netById[self._id] = self
+			nets[self.Name] = self
+		else
 			local connect
 			connect = script:GetAttributeChangedSignal(name):Connect(function()
 				self._id = script:GetAttribute(name)
@@ -383,10 +388,6 @@ function class.new(name, ...)
 					connect = nil
 				end
 			end)
-		else
-			self._id = script:GetAttribute(name)
-			netById[self._id] = self
-			nets[self.Name] = self
 		end
 	else
 		self._id = idCounter
