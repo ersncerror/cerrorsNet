@@ -323,8 +323,8 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local newOffset
 
 		if net._response then
-			local invokeId = readu8(b, offset + 3)
-			local isInvokeSuccess = readu8(b, offset + 4) == 1 and true or false
+			local invokeId = readu8(b, offset)
+			local isInvokeSuccess = readu8(b, offset + 1) == 1 and true or false
 			local datas = {}
 
 			readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
@@ -391,6 +391,9 @@ function class.new(name, ...)
 		end
 	else
 		self._id = idCounter
+		netById[self._id] = self
+		nets[self.Name] = self
+
 		idCounter += 1
 		script:SetAttribute(self.Name, self._id)
 	end
