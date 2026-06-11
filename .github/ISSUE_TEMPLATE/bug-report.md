@@ -7,11 +7,14 @@ assignees: ''
 
 ---
 
-# Issue
+## Issue
 Describe what issue you exactly meet.
 
-# Reproduce 
+## Reproduce 
 Describe how does the the issue happens. (eg. it happens on response net, it happens on unserializing.)
 
-# Additional
+## Library information
+- Version: 
+
+## Additional
 You can upload files here like logs, videos and images.
