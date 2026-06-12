@@ -4,4 +4,5 @@ return {
 	MAX_CACHE_PACKETS = 64, -- this is for nets if they aren't registered.
 
 	DEFAULT_TIMEOUT = 5, -- when net is changed to response, before :WithTimeoutOf call.
+	MAX_PENDING_INVOKES = 128,
 }

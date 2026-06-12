@@ -34,6 +34,8 @@ local enums = {
 	},
 } :: enumList
 
+local generateCounter = 0
+
 local class = {} :: Invoker & enumList
 class.__index = class
 
@@ -56,8 +58,18 @@ function class.new(timeout)
 	self._solvers = {}
 	self._awaits = {}
 
+	self._generation = generateCounter
+	generateCounter += 1
+
+	if generateCounter > 126 then
+		generateCounter = 0
+	end
+
 	if timeout then
-		self._timeout = task.delay(timeout, self._callSolver, self, enums.timeout)
+		self._timeout = task.delay(timeout, function()
+			self._solved = true
+			callSolvers(self, enums.timeout)
+		end)
 	end
 
 	return self
@@ -142,6 +154,8 @@ end
 export type Invoker = {
 	_solved: boolean,
 	_timeout: thread?,
+	_generation: number,
+
 	_awaits: { thread }?,
 	_solvers: { [enum | number]: { (...any) -> () } },
 

@@ -1,3 +1,10 @@
+type ResponseData = {
+	invokeSucceed: boolean?,
+	invokeId: number,
+	generation: number,
+}
+
+-- services
 local RunService = game:GetService("RunService")
 
 -- modules
@@ -28,10 +35,12 @@ local remoteEvent: RemoteEvent
 local unreliRemoteEvent: UnreliableRemoteEvent
 
 -- variables
-local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
 local BYTES_PER_FRAME = Configuration.BYTES_PER_FRAME
 local MAX_QUEUED_PACKETS = Configuration.MAX_QUEUED_PACKETS
 local MAX_CACHE_PACKETS = Configuration.MAX_CACHE_PACKETS
+
+local DEFAULT_TIMEOUT = Configuration.DEFAULT_TIMEOUT
+local MAX_PENDING_INVOKES = Configuration.MAX_PENDING_INVOKES
 
 local isClient = RunService:IsClient()
 
@@ -54,23 +63,32 @@ local packetDropCounters = {} :: { [number]: number }
 local class = {} :: Net
 class.__index = class
 
-local function findFirstEmptyKeyInArray(array: { any }): number
+local function getIdForInvoker(array: { Invoker }): number?
 	local index = 1
-	while array[index] ~= nil do
+	while index ~= MAX_PENDING_INVOKES do
+		if not array[index] or array[index]._solved then
+			break
+		end
+
 		index += 1
+	end
+
+	if index == MAX_PENDING_INVOKES then
+		return nil
 	end
 
 	return index
 end
 
 -- Net work related --
+
 local function disconnect(self: Connection)
 	self._previous._next = self._next
 	self._next._previous = self._previous
 	task.defer(table.clear, self)
 end
 
-local function queuePacket(self: Net, packet: { any })
+local function queuePacket(self: Net, packet: { any }, responseData: ResponseData?)
 	if #self._queuedPackets > MAX_QUEUED_PACKETS then
 		if #self._queuedPackets % 4294967296 == 0 then
 			warn(
@@ -81,7 +99,7 @@ local function queuePacket(self: Net, packet: { any })
 		return
 	end
 
-	table.insert(self._queuedPackets, packet)
+	table.insert(self._queuedPackets, { packet = packet, responseData = responseData })
 end
 
 local function sendToListeners(self: Net, packet: { any })
@@ -102,6 +120,37 @@ local function sendToListeners(self: Net, packet: { any })
 
 		connection = connection._next
 	end
+end
+
+local function readResponseData(packet: Packet, offset: number): ResponseData
+	local datas = {}
+
+	local byte = readu8(packet.b, offset + 1)
+
+	datas.invokeId = readu8(packet.b, offset)
+
+	datas.invokeSucceed = byte >= 128
+
+	if datas.invokeSucceed then
+		byte = byte - 128
+	end
+
+	datas.generation = byte
+
+	return datas
+end
+
+local function writeResponseData(packet: Packet, datas: ResponseData)
+	local succeed = datas.invokeSucceed
+	local generation = datas.generation
+
+	local byte = succeed and 128 or 0
+
+	byte += generation
+
+	writeu8(packet.b, packet.offset, datas.invokeId)
+	writeu8(packet.b, packet.offset + 1, byte)
+	packet.offset += 2
 end
 
 -- write packet related --
@@ -137,8 +186,7 @@ local function writePacketInfo(
 	packetToWrite: Packet,
 	datas: { any },
 	dataTypes: { DataType },
-	invokeId: number?,
-	invokeSuccess: boolean?
+	responseData: ResponseData?
 )
 	if #datas ~= #dataTypes then
 		warn(
@@ -147,25 +195,23 @@ local function writePacketInfo(
 		return
 	end
 
+	local baseInfoSizeRequired = 3 + (self._response and 2 or 0)
 	local size = estimateDataSize(datas, dataTypes)
 
-	if packetToWrite.offset + 3 + size >= BYTES_PER_FRAME then
+	if packetToWrite.offset + baseInfoSizeRequired + size >= BYTES_PER_FRAME then
 		warn(
-			`[CNet]: Packet is too large and cannot write, {3 + size} bytes is required, spaces left {BYTES_PER_FRAME - packetToWrite.offset} bytes.`
+			`[CNet]: Packet is too large and cannot write, {baseInfoSizeRequired + size} bytes is required, spaces left {BYTES_PER_FRAME - packetToWrite.offset} bytes.`
 		)
 		return
 	end
 
 	writeu8(packetToWrite.b, packetToWrite.offset, self._id) -- 1b
 	writeu16(packetToWrite.b, packetToWrite.offset + 1, size) -- 2b
-
-	if self._response then
-		writeu8(packetToWrite.b, packetToWrite.offset + 3, invokeId)
-		writeu8(packetToWrite.b, packetToWrite.offset + 4, invokeSuccess and 1 or 0)
-		packetToWrite.offset += 2
-	end
-
 	packetToWrite.offset += 3
+
+	if self._response and responseData then
+		writeResponseData(packetToWrite, responseData)
+	end
 end
 
 -- read packet related --
@@ -201,18 +247,19 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	return result, offset
 end
 
-local function handleResponsePacket(
-	self: Net,
-	datas: { any },
-	player: Player?,
-	invokeId: number?,
-	invokeSuccess: boolean?
-)
-	if self._pendingInvokes[invokeId] then
-		-- this is the invoke caller
-		local invoker = self._pendingInvokes[invokeId]
-		self._pendingInvokes[invokeId] = nil
+local function handleResponsePacket(self: Net, datas: { any }, responseData: ResponseData, player: Player?)
+	local invokeSuccess = responseData.invokeSucceed
+	local invokeId = responseData.invokeId
+	local generation = responseData.generation
+
+	local invoker = self._pendingInvokes[invokeId]
+	if invoker and invoker._generation == generation then
+		if invoker._solved then
+			return
+		end
+
 		invoker:_callSolver(invokeSuccess and Invoker.success or Invoker.failed, unpack(datas))
+		self._pendingInvokes[invokeId] = { _solved = true, _generation = generation }
 	else
 		-- response the invoke caller
 
@@ -222,7 +269,7 @@ local function handleResponsePacket(
 		end
 
 		if not self._onInvoke then
-			queuePacket(self, datas)
+			queuePacket(self, datas, responseData)
 			return
 		end
 
@@ -240,8 +287,7 @@ local function handleResponsePacket(
 			player and playerPackets[player].stable or globalPackets,
 			responseDatas,
 			self._responseDataTypes,
-			invokeId,
-			true
+			{ invokeId = invokeId, invokeSucceed = success, generation = generation }
 		)
 
 		if player then
@@ -323,8 +369,10 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local newOffset
 
 		if net._response then
-			local invokeId = readu8(b, offset)
-			local isInvokeSuccess = readu8(b, offset + 1) == 1 and true or false
+			local responseData = readResponseData(packet, offset)
+			local invokeId = responseData.invokeId
+			local isInvokeSuccess = responseData.invokeSucceed
+
 			local datas = {}
 
 			readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
@@ -338,7 +386,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 				newOffset = unserialized[2]
 			end
 
-			handleResponsePacket(net, datas, player, invokeId, isInvokeSuccess)
+			handleResponsePacket(net, datas, responseData, player)
 		else
 			readers = net._dataTypes
 
@@ -444,7 +492,7 @@ function class:FireAll(...)
 end
 
 function class:Connect(func)
-	assert(not self._response, `Cannot use :Connect() on response net, use :OnInvoke instead.`)
+	assert(not self._response, `:Connect() is not availiable for response net, use :OnInvoke instead.`)
 
 	local connection = {}
 	connection._next = self._eventListeners
@@ -457,7 +505,7 @@ function class:Connect(func)
 
 	if #self._queuedPackets > 0 then
 		for _, packet in self._queuedPackets do
-			task.spawn(func, table.unpack(packet))
+			task.spawn(func, table.unpack(packet.packet))
 		end
 		table.clear(self._queuedPackets)
 	end
@@ -466,7 +514,7 @@ function class:Connect(func)
 end
 
 function class:Once(func)
-	assert(not self._response, `Cannot connect once function to response net.`)
+	assert(not self._response, `:Once is not available for response net.`)
 
 	local connection = {}
 	connection._next = self._eventListeners
@@ -484,7 +532,7 @@ function class:Once(func)
 end
 
 function class:Wait()
-	assert(not self._response, `Cannot connect wait on a response net.`)
+	assert(not self._response, `:Wait is not available for response net..`)
 
 	local connection = {}
 	connection._next = self._eventListeners
@@ -513,7 +561,7 @@ function class:Response(...)
 end
 
 function class:WithTimeoutOf(timeout)
-	assert(self._response, `[CNet]: Could not set timeout for a non-response Net. (Name:"{self.Name}")`)
+	assert(self._response, `[CNet]: Could not set timeout for a non-response Net. (Net name:"{self.Name}")`)
 	assert(typeof(timeout) == "number", `[CNet]: Cannot set timeout with a value of type "{typeof(timeout)}".`)
 
 	self._timeout = timeout
@@ -522,31 +570,54 @@ function class:WithTimeoutOf(timeout)
 end
 
 function class:InvokeServer(...)
+	local id = getIdForInvoker(self._pendingInvokes)
+
+	if not id then
+		error(`[CNet]: Pending invokes is fulled and cannot having more. ({MAX_PENDING_INVOKES} invokes pending)`)
+	end
+
 	local datas = { ... }
 
-	local id = findFirstEmptyKeyInArray(self._pendingInvokes)
+	self._pendingInvokes[id] = Invoker.new(self._timeout):Timeout(function()
+		self._pendingInvokes[id] = { _solved = true, _generation = self._pendingInvokes[id]._generation }
+	end)
 
-	writePacketInfo(self, globalPackets, datas, self._dataTypes, id)
+	writePacketInfo(
+		self,
+		globalPackets,
+		datas,
+		self._dataTypes,
+		{ generation = self._pendingInvokes[id]._generation, invokeId = id }
+	)
 	globalPackets:Write(datas, self._dataTypes)
 
-	self._pendingInvokes[id] = Invoker.new(self._timeout):Timeout(function()
-		self._pendingInvokes[id] = nil
-	end)
 	return self._pendingInvokes[id]
 end
 
 function class:InvokeClient(player, ...)
+	local id = getIdForInvoker(self._pendingInvokes)
+
+	if not id then
+		error(`[CNet]: Pending invokes is fulled and cannot having more. ({MAX_PENDING_INVOKES} invokes pending)`)
+	end
+
 	local datas = { ... }
 
 	local plrPacket = setPlayerPacket(player)
-	local id = findFirstEmptyKeyInArray(self._pendingInvokes)
-
-	writePacketInfo(self, plrPacket.stable, datas, self._dataTypes, id)
-	plrPacket.stable:Write(datas, self._dataTypes)
 
 	self._pendingInvokes[id] = Invoker.new(self._timeout):Timeout(function()
-		self._pendingInvokes[id] = nil
+		self._pendingInvokes[id] = { _solved = true, _generation = self._pendingInvokes[id]._generation }
 	end)
+
+	writePacketInfo(
+		self,
+		plrPacket.stable,
+		datas,
+		self._dataTypes,
+		{ generation = self._pendingInvokes[id]._generation, invokeId = id }
+	)
+	plrPacket.stable:Write(datas, self._dataTypes)
+
 	return self._pendingInvokes[id]
 end
 
@@ -557,7 +628,7 @@ function class:OnInvoke(func)
 
 	if #self._queuedPackets > 0 then
 		for _, datas in self._queuedPackets do
-			handleResponsePacket(self, datas)
+			handleResponsePacket(self, datas.packet, datas.responseData)
 		end
 	end
 
@@ -617,7 +688,7 @@ export type Net = {
 
 	-- stable net properties
 	_eventListeners: Connection,
-	_queuedPackets: { { any } },
+	_queuedPackets: { { packet: { any }, responseData: ResponseData? } },
 
 	-- unstable net properties
 	_unstable: boolean?,

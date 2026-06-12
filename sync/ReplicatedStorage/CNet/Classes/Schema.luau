@@ -123,9 +123,41 @@ function class.dict(keyType, valueType)
 	return dataType
 end
 
+function class.array(valueType)
+	local dataType = {}
+
+	dataType.write = function(packet: Packet, value: { [number]: any })
+		local keys = #value
+		buffer.writeu8(packet.b, packet.offset, keys)
+		packet.offset += 1
+
+		for _, v in value do
+			valueType.write(packet, v)
+		end
+	end
+
+	dataType.read = function(packet: Packet, offset: number)
+		local keys = buffer.readu8(packet.b, offset)
+		local old = offset
+		local t = {}
+
+		offset += 1
+		for _ = 1, keys do
+			local value, increased = valueType.read(packet, offset)
+			offset += increased
+			table.insert(t, value)
+		end
+
+		return t, offset - old
+	end
+
+	return dataType
+end
+
 export type Schema = {
 	new: (struct: { [string]: DataType }) -> DataType,
 	dict: (keyType: DataType, valueType: DataType) -> DataType,
+	array: (valueType: DataType) -> DataType,
 }
 
 return class

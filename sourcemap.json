@@ -5,49 +5,49 @@
     {
       "name": "Lighting",
       "className": "Lighting",
-      "guid": "139569",
+      "guid": "137257",
       "children": [
         {
           "name": "Atmosphere",
           "className": "Atmosphere",
-          "guid": "139556"
+          "guid": "137245"
         },
         {
           "name": "Bloom",
           "className": "BloomEffect",
-          "guid": "139557"
+          "guid": "137246"
         },
         {
           "name": "DepthOfField",
           "className": "DepthOfFieldEffect",
-          "guid": "139566"
+          "guid": "137254"
         },
         {
           "name": "Sky",
           "className": "Sky",
-          "guid": "139586"
+          "guid": "137274"
         },
         {
           "name": "SunRays",
           "className": "SunRaysEffect",
-          "guid": "139592"
+          "guid": "137280"
         }
       ]
     },
     {
       "name": "ReplicatedFirst",
       "className": "ReplicatedFirst",
-      "guid": "139268"
+      "guid": "137100"
     },
     {
       "name": "ReplicatedStorage",
       "className": "ReplicatedStorage",
-      "guid": "139363",
+      "guid": "137167",
       "children": [
         {
           "name": "CNet",
           "className": "ModuleScript",
-          "guid": "139572",
+          "guid": "5799676",
           "filePaths": [
             "sync/ReplicatedStorage/CNet.luau"
           ],
@@ -55,7 +55,7 @@
             {
               "name": "_types",
               "className": "ModuleScript",
-              "guid": "139576",
+              "guid": "5799682",
               "filePaths": [
                 "sync/ReplicatedStorage/CNet/_types.luau"
               ]
@@ -63,12 +63,12 @@
             {
               "name": "Classes",
               "className": "Folder",
-              "guid": "139567",
+              "guid": "5799678",
               "children": [
                 {
                   "name": "Invoker",
                   "className": "ModuleScript",
-                  "guid": "139575",
+                  "guid": "5799694",
                   "filePaths": [
                     "sync/ReplicatedStorage/CNet/Classes/Invoker.luau"
                   ]
@@ -76,7 +76,7 @@
                 {
                   "name": "Packet",
                   "className": "ModuleScript",
-                  "guid": "139574",
+                  "guid": "5799692",
                   "filePaths": [
                     "sync/ReplicatedStorage/CNet/Classes/Packet.luau"
                   ]
@@ -84,7 +84,7 @@
                 {
                   "name": "Schema",
                   "className": "ModuleScript",
-                  "guid": "139573",
+                  "guid": "5799688",
                   "filePaths": [
                     "sync/ReplicatedStorage/CNet/Classes/Schema.luau"
                   ]
@@ -94,7 +94,7 @@
             {
               "name": "Configuration",
               "className": "ModuleScript",
-              "guid": "139580",
+              "guid": "5799686",
               "filePaths": [
                 "sync/ReplicatedStorage/CNet/Configuration.luau"
               ]
@@ -102,7 +102,7 @@
             {
               "name": "DataTypes",
               "className": "ModuleScript",
-              "guid": "139577",
+              "guid": "5799684",
               "filePaths": [
                 "sync/ReplicatedStorage/CNet/DataTypes.luau"
               ],
@@ -110,7 +110,7 @@
                 {
                   "name": "Instance",
                   "className": "ModuleScript",
-                  "guid": "139578",
+                  "guid": "5799690",
                   "filePaths": [
                     "sync/ReplicatedStorage/CNet/DataTypes/Instance.luau"
                   ]
@@ -118,7 +118,7 @@
                 {
                   "name": "uint8",
                   "className": "ModuleScript",
-                  "guid": "139579",
+                  "guid": "5799696",
                   "filePaths": [
                     "sync/ReplicatedStorage/CNet/DataTypes/uint8.luau"
                   ]
@@ -128,7 +128,7 @@
             {
               "name": "VERSION",
               "className": "StringValue",
-              "guid": "139591"
+              "guid": "5799725"
             }
           ]
         }
@@ -137,12 +137,12 @@
     {
       "name": "ServerScriptService",
       "className": "ServerScriptService",
-      "guid": "139364",
+      "guid": "137168",
       "children": [
         {
           "name": "Server",
           "className": "Script",
-          "guid": "139585",
+          "guid": "5799674",
           "filePaths": [
             "sync/ServerScriptService/Server.server.luau"
           ]
@@ -152,42 +152,42 @@
     {
       "name": "ServerStorage",
       "className": "ServerStorage",
-      "guid": "139365"
+      "guid": "137169"
     },
     {
       "name": "SoundService",
       "className": "SoundService",
-      "guid": "139243"
+      "guid": "137075"
     },
     {
       "name": "StarterGui",
       "className": "StarterGui",
-      "guid": "139311"
+      "guid": "137114"
     },
     {
       "name": "StarterPack",
       "className": "StarterPack",
-      "guid": "139310"
+      "guid": "137113"
     },
     {
       "name": "StarterPlayer",
       "className": "StarterPlayer",
-      "guid": "139309",
+      "guid": "137112",
       "children": [
         {
           "name": "StarterCharacterScripts",
           "className": "StarterCharacterScripts",
-          "guid": "139588"
+          "guid": "137276"
         },
         {
           "name": "StarterPlayerScripts",
           "className": "StarterPlayerScripts",
-          "guid": "139589",
+          "guid": "137277",
           "children": [
             {
               "name": "LocalScript",
               "className": "LocalScript",
-              "guid": "139570",
+              "guid": "5799680",
               "filePaths": [
                 "sync/StarterPlayer/StarterPlayerScripts/LocalScript.client.luau"
               ]
@@ -199,34 +199,34 @@
     {
       "name": "Workspace",
       "className": "Workspace",
-      "guid": "138403",
+      "guid": "136235",
       "children": [
         {
           "name": "Baseplate",
           "className": "Part",
-          "guid": "139583"
+          "guid": "137271"
         },
         {
           "name": "Camera",
           "className": "Camera",
-          "guid": "139560"
+          "guid": "137248"
         },
         {
           "name": "SpawnLocation",
           "className": "SpawnLocation",
-          "guid": "139587",
+          "guid": "137275",
           "children": [
             {
               "name": "Decal",
               "className": "Decal",
-              "guid": "139565"
+              "guid": "137253"
             }
           ]
         },
         {
           "name": "Terrain",
           "className": "Terrain",
-          "guid": "139594"
+          "guid": "137282"
         }
       ]
     }
