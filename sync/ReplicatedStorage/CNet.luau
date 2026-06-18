@@ -273,11 +273,13 @@ local function handleResponsePacket(self: Net, datas: { any }, responseData: Res
 			return
 		end
 
-		local success, result = pcall(self._onInvoke, unpack(datas))
-		local responseDatas = { result }
+		local results = table.pack(pcall(self._onInvoke, unpack(datas)))
+		local success = results[1]
+		local responseDatas = table.clone(results)
+		table.remove(responseDatas, 1)
 
 		if not success then
-			warn(`[CNet]: Failed to get response from invoke handler. message catched: {result}`)
+			warn(`[CNet]: Failed to get response from invoke handler. message catched: {results[2]}`)
 			writePacketInfo(self, player and playerPackets[player].stable or globalPackets, {}, {}, invokeId)
 			return
 		end
