@@ -1,65 +1,99 @@
 # cerrorsNet
-roblox network library (with terrible codes)<br>
-**This project is built with [Azul](https://devforum.roblox.com/t/azul-%E2%80%94-easy-powerful-studio-first-two-way-sync/4159808).**
+A roblox network library. ~~(with terrible codes)~~<br>
+This project is built with [Azul](https://devforum.roblox.com/t/azul-%E2%80%94-easy-powerful-studio-first-two-way-sync/4159808).
 
-## Example Usage
+# features
+- pack all datas into one event
+- remote functions are safer with timeout
+- idk
 
-### Server
+# simple docs
+
+> Basic usage
 ```lua
+-- client
+local CNet = require("path/to/the/module")
 
-local CNet = require("Path/To/The/Module")
+local myNet = CNet.new("myNet", CNet.uint8 )
 
-local newNet = CNet.new("myFirstNet", CNet.DataTypes.u8)
+myNet:FireAll(1)
 
-newNet:FireAll(10)
+-- server
+local CNet = require("path/to/the/module")
 
-```
+local myNet = CNet.new("myNet", CNet.uint8 )
 
-### Client
-```lua
-
-local CNet = require("Path/To/The/Module")
-
-local newNet = CNet.new("myFirstNet", CNet.DataTypes.u8)
-
-newNet:Connect(function(...)
-    print(...) -- 10
+myNet:Connect(function(player, ...)
+    print(player, ...) -- Roblox, 1
 end)
 
 ```
 
-## Data Types
-See `DataTypes` under the Module, you can add your own data types. It should follow the format of:
-
-- Having a read and write function.
-- The write function can return a number for telling how much bytes is taked, and it should use for data types with unpredictable bytes, like string.
-- - If it is predictable, then you should have a interger value in the table with key of "bytes".
-
-It should like this:
+> Remote Function (Response Net)
 ```lua
--- sync/ReplicatedStorage/CNet/DataTypes/u8.luau
+-- client
+local CNet = require("path/to/the/module")
 
-return {
-	bytes = 1,	
+local myNet = CNet.new("myNet", CNet.uint8 ):Response(CNet.uint8):WithTimeoutOf(1)
 
-	write = function(b: buffer, offset: number, value: number)
-		writeu8(b, offset, value)
-		return 1
-	end,
-	read = function(b: buffer, offset: number)
-		return readu8(b, offset)
-	end,	
-}
+myNet:InvokeServer(1):Success(function(number)
+    print(number) -- 2
+end):Timeout(function() -- nothing will be return if timeout
+    print("Timeout!")
+end)
+
+-- server
+local CNet = require("path/to/the/module")
+
+local myNet = CNet.new("myNet", CNet.uint8 ):Response(CNet.uint8)
+
+myNet:OnInvoke(function(player, number)
+    return number + 1
+end)
+
 ```
 
-After that, you should require it in the list.
+> Unreliable RemoteEvent (Unstable Net)
 ```lua
--- sync/ReplicatedStorage/CNet/DataTypes.luau
+-- client
+local CNet = require("path/to/the/module")
 
-local dataTypes = {
-	u8 = require(script.u8)
+local myNet = CNet.new("myNet", CNet.uint8 ):Unstable()
+
+myNet:FireAll(1)
+
+-- server
+local CNet = require("path/to/the/module")
+
+local myNet = CNet.new("myNet", CNet.uint8 ):Unstable()
+
+myNet:Connect(function(player, ...)
+    print(player, ...) -- Roblox, 1
+end)
+
+```
+
+## Adding more data types
+See the DataTypes under the library, add your own custom data types under module.
+
+**Data types may cause read/write operations of the library to fail if they have bugs.** Please confirm whether the problem lies with the data type or the library itself.
+
+**A vaild data type should follow like this:**<br>
+- A write function, takes packet, and value to write.
+- A read function, takes packet, and a offset.
+- write function is required to increase the packet offset, otherwise, it will possibly cause a error in library.
+- read function is different, return increased offset as #2 parameter.
+
+### Example
+```lua
+-- sync/ReplicatedStorage/CNet/DataTypes/uint8.luau
+return {
+	write = function(packet: Packet, value: number)
+		buffer.writeu8(packet.b, packet.offset, math.floor(value))
+		packet.offset += 1
+	end,
+	read = function(packet: Packet, offset: number)
+		return buffer.readu8(packet.b, offset), 1
+	end,
 }
-
-return dataTypes 
-
 ```
