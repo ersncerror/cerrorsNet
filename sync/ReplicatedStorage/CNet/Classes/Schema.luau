@@ -38,7 +38,6 @@ function class.new(struct)
 
 	dataType.write = function(packet: Packet, value: { [string]: any })
 		local byte = buffer.readu8(packet.b, packet.offset)
-		local totalIncreased = 1
 
 		for i, key in keys do
 			if value[key] then
@@ -53,11 +52,8 @@ function class.new(struct)
 				continue
 			end
 
-			local increased = struct[key].write(packet, value[key])
-			totalIncreased += increased or struct[key].bytes
+			struct[key].write(packet, value[key])
 		end
-
-		return totalIncreased
 	end
 
 	dataType.read = function(packet: Packet, offset: number)
