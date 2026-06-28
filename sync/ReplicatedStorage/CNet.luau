@@ -1,6 +1,6 @@
 --[[
 
-	CNet, Version 1.0
+	CNet, Version 1.1
 
 	CNet is a roblox static network library.
 	Github repository: https://github.com/ersncerror/cerrorsNet
@@ -210,7 +210,7 @@ local function estimateDataSize(datas: { any }, dataTypes: { DataType })
 		dataType.write(estimatePacket, datas[index])
 	end
 
-	return estimatePacket.offset + 1
+	return estimatePacket.offset --+ 1
 end
 
 local function writePacketInfo(
@@ -378,6 +378,8 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local length = readu16(b, offset + 1)
 
 		offset += 3
+
+		print(lenb(b), offset, length)
 
 		if offset + length > lenb(b) then
 			warn(
