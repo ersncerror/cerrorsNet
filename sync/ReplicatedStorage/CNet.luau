@@ -391,6 +391,12 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 		local net = netById[netId] :: Net
 
 		if not net then
+			if not isClient then
+				offset += length
+				netId = readu8(b, offset)
+				continue
+			end
+
 			local packetToCache = buffer.create(length)
 			copyb(packetToCache, 0, b, offset, length)
 			cachePacketToUnreadyNet(netId, packetToCache)
@@ -455,7 +461,7 @@ function class.new(name, ...)
 	self.Name = name
 	self._dataTypes = { ... }
 
-	if RunService:IsClient() then
+	if isClient then
 		if script:GetAttribute(name) then
 			self._id = script:GetAttribute(name)
 			netById[self._id] = self
