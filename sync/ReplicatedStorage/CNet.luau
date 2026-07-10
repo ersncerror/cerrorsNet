@@ -246,6 +246,20 @@ local function writePacketInfo(
 	end
 end
 
+local function writeOneWayPacketWithMessageCatcher(
+	self: Net,
+	packetToWrite: Packet,
+	datas: { DataType? },
+	dataTypes: { DataType }
+)
+	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
+	local success, errormsg = packetToWrite:Write(datas, dataTypes)
+
+	if not success then
+		warn(`[CNet]: Failed to write datas into packet. Message catched: {errormsg}`)
+	end
+end
+
 -- read packet related --
 local function cachePacketToUnreadyNet(netId: number, packetToCache: buffer)
 	cachedPackets[netId] = cachedPackets[netId] or {}
@@ -267,11 +281,18 @@ local function cachePacketToUnreadyNet(netId: number, packetToCache: buffer)
 	table.insert(cachedPackets[netId], packetToCache)
 end
 
-local function unserialize(packet: Packet, offset: number, dataTypes: { DataType })
+local function unserialize(packet: Packet, offset: number, dataTypes: { DataType }): (any | string, number | string)
 	local result = {}
 
 	for _, dataType in dataTypes do
-		local value, increased = dataType.read(packet, offset)
+		local pcallResult = { pcall(dataType.read, packet, offset) }
+		local success = pcallResult[1]
+
+		if not success then
+			return "Failed", pcallResult[2]
+		end
+
+		local value, increased = pcallResult[2], pcallResult[3]
 		table.insert(result, value)
 		offset += increased
 	end
@@ -379,8 +400,6 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 
 		offset += 3
 
-		print(lenb(b), offset, length)
-
 		if offset + length > lenb(b) then
 			warn(
 				`[CNet]: Malformed packet with length of {length}, exceeded buffer access bound. (bufferSize: {lenb(b)}, offset:{offset})`
@@ -392,9 +411,12 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 
 		if not net then
 			if not isClient then
-				offset += length
-				netId = readu8(b, offset)
-				continue
+				-- if we are server, then we can't trust client easily
+				-- due to client can pass a incorrect length and a invalid net.
+				warn(
+					`[CNet]: Possibly exploiter detected, {player} was attempting to send packets to a non-exists net with id of {netId}.`
+				)
+				return
 			end
 
 			local packetToCache = buffer.create(length)
@@ -415,7 +437,7 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 			local invokeId = responseData.invokeId
 			local isInvokeSuccess = responseData.invokeSucceed
 
-			local datas = {}
+			local datas
 
 			readers = (net._response and net._pendingInvokes[invokeId]) and net._responseDataTypes or net._dataTypes
 			offset += 2
@@ -428,18 +450,27 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 				newOffset = unserialized[2]
 			end
 
-			handleResponsePacket(net, datas, responseData, player)
+			if datas == "Failed" then
+				offset += length
+			else
+				handleResponsePacket(net, datas, responseData, player)
+			end
 		else
 			readers = net._dataTypes
 
 			local datas, nOffset = unserialize(packet, offset, readers)
-			newOffset = nOffset
 
-			if player then
-				table.insert(datas, 1, player)
+			if datas ~= "Failed" then
+				newOffset = nOffset
+
+				if player then
+					table.insert(datas, 1, player)
+				end
+
+				sendToListeners(net, datas)
+			else
+				offset += length
 			end
-
-			sendToListeners(net, datas)
 		end
 
 		offset = newOffset
@@ -452,6 +483,11 @@ end
 -- Net function/methods --
 
 function class.new(name, ...)
+	assert(
+		typeof(name) == "string",
+		`[CNet]: Could not construct a new net object with a non-string identifier. Got value of type {typeof(name)}.`
+	)
+
 	if nets[name] then
 		return nets[name]
 	end
@@ -460,6 +496,21 @@ function class.new(name, ...)
 
 	self.Name = name
 	self._dataTypes = { ... }
+
+	for _, dataType in self._dataTypes do
+		local write = dataType.write
+		local read = dataType.read
+
+		assert(
+			typeof(write) == "function",
+			`[CNet]: Constructing a net object, but invalid data type was found. {dataType} was provided a non-function member of "write".`
+		)
+
+		assert(
+			typeof(read) == "function",
+			`[CNet]: Constructing a net object, but invalid data type was found. {dataType} was provided a non-function member of "read".`
+		)
+	end
 
 	if isClient then
 		if script:GetAttribute(name) then
@@ -520,8 +571,7 @@ function class:Fire(player, ...)
 	local plrPackets = setPlayerPacket(player, self._unstable)
 	local packetToWrite = self._unstable and plrPackets.unstable or plrPackets.stable
 
-	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
-	packetToWrite:Write(datas, self._dataTypes)
+	writeOneWayPacketWithMessageCatcher(self, packetToWrite, datas, self._dataTypes)
 end
 
 function class:FireAll(...)
@@ -529,8 +579,7 @@ function class:FireAll(...)
 
 	local packetToWrite = self._unstable and unstablePacket or globalPackets
 
-	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
-	packetToWrite:Write(datas, self._dataTypes)
+	writeOneWayPacketWithMessageCatcher(self, packetToWrite, datas, self._dataTypes)
 end
 
 function class:Connect(func)
@@ -631,7 +680,12 @@ function class:InvokeServer(...)
 		self._dataTypes,
 		{ generation = self._pendingInvokes[id]._generation, invokeId = id }
 	)
-	globalPackets:Write(datas, self._dataTypes)
+
+	local success, errormsg = globalPackets:Write(datas, self._dataTypes)
+
+	if not success then
+		warn(`[CNet]: Failed to write datas into packet. Message catched: {errormsg}`)
+	end
 
 	return self._pendingInvokes[id]
 end
