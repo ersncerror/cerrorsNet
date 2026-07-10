@@ -16,8 +16,6 @@ local function write(self: Packet, datas: { any }, dataTypes: { types.DataType }
 		if not success then
 			return false, message
 		end
-
-		dataType.write(self, datas[i])
 	end
 
 	return true
