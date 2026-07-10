@@ -221,9 +221,7 @@ local function writePacketInfo(
 	responseData: ResponseData?
 )
 	if #datas ~= #dataTypes then
-		warn(
-			`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but only have {#datas} datas to write.`
-		)
+		warn(`[CNet]: Possibly bug detected. Expect to write {#dataTypes} datas, but have {#datas} datas to write.`)
 		return
 	end
 
@@ -252,11 +250,15 @@ local function writeOneWayPacketWithMessageCatcher(
 	datas: { DataType? },
 	dataTypes: { DataType }
 )
+	local beforeWriteOffset = packetToWrite.offset
+
 	writePacketInfo(self, packetToWrite, datas, self._dataTypes)
 	local success, errormsg = packetToWrite:Write(datas, dataTypes)
 
 	if not success then
 		warn(`[CNet]: Failed to write datas into packet. Message catched: {errormsg}`)
+		-- revert back
+		packetToWrite.offset = beforeWriteOffset
 	end
 end
 
@@ -285,10 +287,11 @@ local function unserialize(packet: Packet, offset: number, dataTypes: { DataType
 	local result = {}
 
 	for _, dataType in dataTypes do
-		local pcallResult = { pcall(dataType.read, packet, offset) }
+		local pcallResult = table.pack(pcall(dataType.read, packet, offset))
 		local success = pcallResult[1]
 
 		if not success then
+			warn(`[CNet]: Unserialize failed, message catched: {pcallResult[2]}`)
 			return "Failed", pcallResult[2]
 		end
 
@@ -393,7 +396,6 @@ end
 local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local offset = 0
 	local packet = { b = b, refs = refs } :: Packet
-
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
@@ -473,7 +475,9 @@ local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 			end
 		end
 
-		offset = newOffset
+		if newOffset then
+			offset = newOffset
+		end
 
 		-- continue to next packet
 		netId = readu8(b, offset)
