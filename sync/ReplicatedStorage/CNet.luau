@@ -579,6 +579,11 @@ function class:Fire(player, ...)
 end
 
 function class:FireAll(...)
+	assert(
+		not (isClient and not self._id),
+		`Net "{self.Name}" does not have a id, it seems like you didn't setup a net on server. This is required.`
+	)
+
 	local datas = { ... }
 
 	local packetToWrite = self._unstable and unstablePacket or globalPackets
