@@ -396,6 +396,15 @@ end
 local function onPacketReceived(b: buffer, refs: { Instance }, player: Player?)
 	local offset = 0
 	local packet = { b = b, refs = refs } :: Packet
+
+	if typeof(b) ~= "buffer" then
+		return
+	end
+
+	if lenb(b) > BYTES_PER_FRAME + 1 then
+		return
+	end
+
 	local netId = readu8(b, offset)
 	while netId ~= 0 do
 		local length = readu16(b, offset + 1)
